@@ -2,14 +2,8 @@
  * wpa_supplicant - Temporary BSSID blacklist
  * Copyright (c) 2003-2007, Jouni Malinen <j@w1.fi>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * Alternatively, this software may be distributed under the terms of BSD
- * license.
- *
- * See README and COPYING for more details.
+ * This software may be distributed under the terms of the BSD license.
+ * See README for more details.
  */
 
 #include "includes.h"
@@ -44,7 +38,7 @@ struct wpa_blacklist * wpa_blacklist_get(struct wpa_supplicant *wpa_s,
  * wpa_blacklist_add - Add an BSSID to the blacklist
  * @wpa_s: Pointer to wpa_supplicant data
  * @bssid: BSSID to be added to the blacklist
- * Returns: 0 on success, -1 on failure
+ * Returns: Current blacklist count on success, -1 on failure
  *
  * This function adds the specified BSSID to the blacklist or increases the
  * blacklist count if the BSSID was already listed. It should be called when
@@ -66,7 +60,7 @@ int wpa_blacklist_add(struct wpa_supplicant *wpa_s, const u8 *bssid)
 		wpa_printf(MSG_DEBUG, "BSSID " MACSTR " blacklist count "
 			   "incremented to %d",
 			   MAC2STR(bssid), e->count);
-		return 0;
+		return e->count;
 	}
 
 	e = os_zalloc(sizeof(*e));
@@ -79,7 +73,7 @@ int wpa_blacklist_add(struct wpa_supplicant *wpa_s, const u8 *bssid)
 	wpa_printf(MSG_DEBUG, "Added BSSID " MACSTR " into blacklist",
 		   MAC2STR(bssid));
 
-	return 0;
+	return e->count;
 }
 
 

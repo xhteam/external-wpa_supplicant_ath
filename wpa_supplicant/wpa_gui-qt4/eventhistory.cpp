@@ -2,14 +2,8 @@
  * wpa_gui - EventHistory class
  * Copyright (c) 2005-2006, Jouni Malinen <j@w1.fi>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * Alternatively, this software may be distributed under the terms of BSD
- * license.
- *
- * See README and COPYING for more details.
+ * This software may be distributed under the terms of the BSD license.
+ * See README for more details.
  */
 
 #include <QHeaderView>
@@ -59,9 +53,9 @@ QVariant EventListModel::headerData(int section, Qt::Orientation orientation,
 	if (orientation == Qt::Horizontal) {
 		switch (section) {
 		case 0:
-			return QString("Timestamp");
+			return QString(tr("Timestamp"));
 		case 1:
-			return QString("Message");
+			return QString(tr("Message"));
 		default:
 			return QVariant();
 		}

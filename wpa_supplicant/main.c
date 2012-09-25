@@ -2,14 +2,8 @@
  * WPA Supplicant / main() function for UNIX like OSes and MinGW
  * Copyright (c) 2003-2007, Jouni Malinen <j@w1.fi>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * Alternatively, this software may be distributed under the terms of BSD
- * license.
- *
- * See README and COPYING for more details.
+ * This software may be distributed under the terms of the BSD license.
+ * See README for more details.
  */
 
 #include "includes.h"
@@ -19,19 +13,23 @@
 
 #include "common.h"
 #include "wpa_supplicant_i.h"
-#ifdef ANDROID
-static char logfile[] = "/data/wpa.log";
-#endif
+#include "driver_i.h"
+
+extern struct wpa_driver_ops *wpa_drivers[];
+
+
 static void usage(void)
 {
 	int i;
 	printf("%s\n\n%s\n"
 	       "usage:\n"
-	       "  wpa_supplicant [-BddhKLqqtuvW] [-P<pid file>] "
+	       "  wpa_supplicant [-BddhKLqqstuvW] [-P<pid file>] "
 	       "[-g<global ctrl>] \\\n"
 	       "        -i<ifname> -c<config file> [-C<ctrl>] [-D<driver>] "
 	       "[-p<driver_param>] \\\n"
-	       "        [-b<br_ifname>] [-f<debug file>] \\\n"
+	       "        [-b<br_ifname>] [-f<debug file>] [-e<entropy file>] "
+	       "\\\n"
+	       "        [-o<override driver>] [-O<override ctrl>] \\\n"
 	       "        [-N -i<ifname> -c<conf> [-C<ctrl>] "
 	       "[-D<driver>] \\\n"
 	       "        [-p<driver_param>] [-b<br_ifname>] ...]\n"
@@ -39,10 +37,10 @@ static void usage(void)
 	       "drivers:\n",
 	       wpa_supplicant_version, wpa_supplicant_license);
 
-	for (i = 0; wpa_supplicant_drivers[i]; i++) {
+	for (i = 0; wpa_drivers[i]; i++) {
 		printf("  %s = %s\n",
-		       wpa_supplicant_drivers[i]->name,
-		       wpa_supplicant_drivers[i]->desc);
+		       wpa_drivers[i]->name,
+		       wpa_drivers[i]->desc);
 	}
 
 #ifndef CONFIG_NO_STDOUT_DEBUG
@@ -53,27 +51,34 @@ static void usage(void)
 	       "  -C = ctrl_interface parameter (only used if -c is not)\n"
 	       "  -i = interface name\n"
 	       "  -d = increase debugging verbosity (-dd even more)\n"
-	       "  -D = driver name\n"
+	       "  -D = driver name (can be multiple drivers: nl80211,wext)\n"
+	       "  -e = entropy file\n");
 #ifdef CONFIG_DEBUG_FILE
-	       "  -f = log output to debug file instead of stdout\n"
+	printf("  -f = log output to debug file instead of stdout\n");
 #endif /* CONFIG_DEBUG_FILE */
-	       "  -g = global ctrl_interface\n"
-	       "  -K = include keys (passwords, etc.) in debug output\n"
-	       "  -t = include timestamp in debug messages\n"
+	printf("  -g = global ctrl_interface\n"
+	       "  -K = include keys (passwords, etc.) in debug output\n");
+#ifdef CONFIG_DEBUG_SYSLOG
+	printf("  -s = log output to syslog instead of stdout\n");
+#endif /* CONFIG_DEBUG_SYSLOG */
+	printf("  -t = include timestamp in debug messages\n"
 	       "  -h = show this help text\n"
-	       "  -L = show license (GPL and BSD)\n");
-	printf("  -p = driver parameters\n"
+	       "  -L = show license (BSD)\n"
+	       "  -o = override driver parameter for new interfaces\n"
+	       "  -O = override ctrl_interface parameter for new interfaces\n"
+	       "  -p = driver parameters\n"
 	       "  -P = PID file\n"
-	       "  -q = decrease debugging verbosity (-qq even less)\n"
-#ifdef CONFIG_CTRL_IFACE_DBUS
-	       "  -u = enable DBus control interface\n"
-#endif /* CONFIG_CTRL_IFACE_DBUS */
-	       "  -v = show version\n"
+	       "  -q = decrease debugging verbosity (-qq even less)\n");
+#ifdef CONFIG_DBUS
+	printf("  -u = enable DBus control interface\n");
+#endif /* CONFIG_DBUS */
+	printf("  -v = show version\n"
 	       "  -W = wait for a control interface monitor before starting\n"
 	       "  -N = start describing new interface\n");
 
 	printf("example:\n"
-	       "  wpa_supplicant -Dwext -iwlan0 -c/etc/wpa_supplicant.conf\n");
+	       "  wpa_supplicant -D%s -iwlan0 -c/etc/wpa_supplicant.conf\n",
+	       wpa_drivers[i] ? wpa_drivers[i]->name : "wext");
 #endif /* CONFIG_NO_STDOUT_DEBUG */
 }
 
@@ -134,7 +139,7 @@ int main(int argc, char *argv[])
 	wpa_supplicant_fd_workaround();
 
 	for (;;) {
-		c = getopt(argc, argv, "b:Bc:C:D:df:g:hi:KLNp:P:qtuvW");
+		c = getopt(argc, argv, "b:Bc:C:D:de:f:g:hi:KLNo:O:p:P:qstuvW");
 		if (c < 0)
 			break;
 		switch (c) {
@@ -163,6 +168,9 @@ int main(int argc, char *argv[])
 			params.wpa_debug_level--;
 			break;
 #endif /* CONFIG_NO_STDOUT_DEBUG */
+		case 'e':
+			params.entropy_file = optarg;
+			break;
 #ifdef CONFIG_DEBUG_FILE
 		case 'f':
 			params.wpa_debug_file_path = optarg;
@@ -185,6 +193,12 @@ int main(int argc, char *argv[])
 			license();
 			exitcode = 0;
 			goto out;
+		case 'o':
+			params.override_driver = optarg;
+			break;
+		case 'O':
+			params.override_ctrl_interface = optarg;
+			break;
 		case 'p':
 			iface->driver_param = optarg;
 			break;
@@ -195,14 +209,19 @@ int main(int argc, char *argv[])
 		case 'q':
 			params.wpa_debug_level++;
 			break;
+#ifdef CONFIG_DEBUG_SYSLOG
+		case 's':
+			params.wpa_debug_syslog++;
+			break;
+#endif /* CONFIG_DEBUG_SYSLOG */
 		case 't':
 			params.wpa_debug_timestamp++;
 			break;
-#ifdef CONFIG_CTRL_IFACE_DBUS
+#ifdef CONFIG_DBUS
 		case 'u':
 			params.dbus_ctrl_interface = 1;
 			break;
-#endif /* CONFIG_CTRL_IFACE_DBUS */
+#endif /* CONFIG_DBUS */
 		case 'v':
 			printf("%s\n", wpa_supplicant_version);
 			exitcode = 0;
@@ -226,9 +245,7 @@ int main(int argc, char *argv[])
 			goto out;
 		}
 	}
-#ifdef ANDROID
-	params.wpa_debug_file_path = logfile;
-#endif
+
 	exitcode = 0;
 	global = wpa_supplicant_init(&params);
 	if (global == NULL) {

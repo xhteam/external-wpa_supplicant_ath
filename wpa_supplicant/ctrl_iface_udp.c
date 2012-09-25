@@ -2,14 +2,8 @@
  * WPA Supplicant / UDP socket -based control interface
  * Copyright (c) 2004-2005, Jouni Malinen <j@w1.fi>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * Alternatively, this software may be distributed under the terms of BSD
- * license.
- *
- * See README and COPYING for more details.
+ * This software may be distributed under the terms of the BSD license.
+ * See README for more details.
  */
 
 #include "includes.h"
@@ -20,7 +14,7 @@
 #include "eapol_supp/eapol_supp_sm.h"
 #include "wpa_supplicant_i.h"
 #include "ctrl_iface.h"
-#include "wpa_ctrl.h"
+#include "common/wpa_ctrl.h"
 
 
 #define COOKIE_LEN 8

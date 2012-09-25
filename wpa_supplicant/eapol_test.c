@@ -1,15 +1,9 @@
 /*
  * WPA Supplicant - test code
- * Copyright (c) 2003-2007, Jouni Malinen <j@w1.fi>
+ * Copyright (c) 2003-2012, Jouni Malinen <j@w1.fi>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * Alternatively, this software may be distributed under the terms of BSD
- * license.
- *
- * See README and COPYING for more details.
+ * This software may be distributed under the terms of the BSD license.
+ * See README for more details.
  *
  * IEEE 802.1X Supplicant test code (to be used in place of wpa_supplicant.c.
  * Not used in production version.
@@ -22,12 +16,15 @@
 #include "config.h"
 #include "eapol_supp/eapol_supp_sm.h"
 #include "eap_peer/eap.h"
+#include "eap_server/eap_methods.h"
 #include "eloop.h"
-#include "wpa.h"
+#include "utils/base64.h"
+#include "rsn_supp/wpa.h"
 #include "eap_peer/eap_i.h"
 #include "wpa_supplicant_i.h"
 #include "radius/radius.h"
 #include "radius/radius_client.h"
+#include "common/wpa_ctrl.h"
 #include "ctrl_iface.h"
 #include "pcsc_funcs.h"
 
@@ -35,7 +32,7 @@
 extern int wpa_debug_level;
 extern int wpa_debug_show_keys;
 
-struct wpa_driver_ops *wpa_supplicant_drivers[] = { NULL };
+struct wpa_driver_ops *wpa_drivers[] = { NULL };
 
 
 struct extra_radius_attr {
@@ -74,6 +71,8 @@ struct eapol_test_data {
 	char *connect_info;
 	u8 own_addr[ETH_ALEN];
 	struct extra_radius_attr *extra_attrs;
+
+	FILE *server_cert_file;
 };
 
 static struct eapol_test_data eapol_test;
@@ -263,7 +262,8 @@ static void ieee802_1x_encapsulate_radius(struct eapol_test_data *e,
 
 	/* State attribute must be copied if and only if this packet is
 	 * Access-Request reply to the previous Access-Challenge */
-	if (e->last_recv_radius && e->last_recv_radius->hdr->code ==
+	if (e->last_recv_radius &&
+	    radius_msg_get_hdr(e->last_recv_radius)->code ==
 	    RADIUS_CODE_ACCESS_CHALLENGE) {
 		int res = radius_msg_copy_attr(msg, e->last_recv_radius,
 					       RADIUS_ATTR_STATE);
@@ -283,14 +283,12 @@ static void ieee802_1x_encapsulate_radius(struct eapol_test_data *e,
 
  fail:
 	radius_msg_free(msg);
-	os_free(msg);
 }
 
 
 static int eapol_test_eapol_send(void *ctx, int type, const u8 *buf,
 				 size_t len)
 {
-	/* struct wpa_supplicant *wpa_s = ctx; */
 	printf("WPA: eapol_test_eapol_send(type=%d len=%lu)\n",
 	       type, (unsigned long) len);
 	if (type == IEEE802_1X_TYPE_EAP_PACKET) {
@@ -304,16 +302,16 @@ static int eapol_test_eapol_send(void *ctx, int type, const u8 *buf,
 static void eapol_test_set_config_blob(void *ctx,
 				       struct wpa_config_blob *blob)
 {
-	struct wpa_supplicant *wpa_s = ctx;
-	wpa_config_set_blob(wpa_s->conf, blob);
+	struct eapol_test_data *e = ctx;
+	wpa_config_set_blob(e->wpa_s->conf, blob);
 }
 
 
 static const struct wpa_config_blob *
 eapol_test_get_config_blob(void *ctx, const char *name)
 {
-	struct wpa_supplicant *wpa_s = ctx;
-	return wpa_config_get_blob(wpa_s->conf, name);
+	struct eapol_test_data *e = ctx;
+	return wpa_config_get_blob(e->wpa_s->conf, name);
 }
 
 
@@ -382,6 +380,53 @@ static void eapol_sm_cb(struct eapol_sm *eapol, int success, void *ctx)
 }
 
 
+static void eapol_test_write_cert(FILE *f, const char *subject,
+				  const struct wpabuf *cert)
+{
+	unsigned char *encoded;
+
+	encoded = base64_encode(wpabuf_head(cert), wpabuf_len(cert), NULL);
+	if (encoded == NULL)
+		return;
+	fprintf(f, "%s\n-----BEGIN CERTIFICATE-----\n%s"
+		"-----END CERTIFICATE-----\n\n", subject, encoded);
+	os_free(encoded);
+}
+
+
+static void eapol_test_cert_cb(void *ctx, int depth, const char *subject,
+			       const char *cert_hash,
+			       const struct wpabuf *cert)
+{
+	struct eapol_test_data *e = ctx;
+
+	wpa_msg(e->wpa_s, MSG_INFO, WPA_EVENT_EAP_PEER_CERT
+		"depth=%d subject='%s'%s%s",
+		depth, subject,
+		cert_hash ? " hash=" : "",
+		cert_hash ? cert_hash : "");
+
+	if (cert) {
+		char *cert_hex;
+		size_t len = wpabuf_len(cert) * 2 + 1;
+		cert_hex = os_malloc(len);
+		if (cert_hex) {
+			wpa_snprintf_hex(cert_hex, len, wpabuf_head(cert),
+					 wpabuf_len(cert));
+			wpa_msg_ctrl(e->wpa_s, MSG_INFO,
+				     WPA_EVENT_EAP_PEER_CERT
+				     "depth=%d subject='%s' cert=%s",
+				     depth, subject, cert_hex);
+			os_free(cert_hex);
+		}
+
+		if (e->server_cert_file)
+			eapol_test_write_cert(e->server_cert_file,
+					      subject, cert);
+	}
+}
+
+
 static int test_eapol(struct eapol_test_data *e, struct wpa_supplicant *wpa_s,
 		      struct wpa_ssid *ssid)
 {
@@ -393,7 +438,7 @@ static int test_eapol(struct eapol_test_data *e, struct wpa_supplicant *wpa_s,
 		printf("Failed to allocate EAPOL context.\n");
 		return -1;
 	}
-	ctx->ctx = wpa_s;
+	ctx->ctx = e;
 	ctx->msg_ctx = wpa_s;
 	ctx->scard_ctx = wpa_s->scard;
 	ctx->cb = eapol_sm_cb;
@@ -404,11 +449,11 @@ static int test_eapol(struct eapol_test_data *e, struct wpa_supplicant *wpa_s,
 	ctx->eapol_send = eapol_test_eapol_send;
 	ctx->set_config_blob = eapol_test_set_config_blob;
 	ctx->get_config_blob = eapol_test_get_config_blob;
-#ifdef EAP_TLS_OPENSSL
 	ctx->opensc_engine_path = wpa_s->conf->opensc_engine_path;
 	ctx->pkcs11_engine_path = wpa_s->conf->pkcs11_engine_path;
 	ctx->pkcs11_module_path = wpa_s->conf->pkcs11_module_path;
-#endif /* EAP_TLS_OPENSSL */
+	ctx->cert_cb = eapol_test_cert_cb;
+	ctx->cert_in_cb = 1;
 
 	wpa_s->eapol = eapol_sm_init(ctx);
 	if (wpa_s->eapol == NULL) {
@@ -442,10 +487,8 @@ static void test_eapol_clean(struct eapol_test_data *e,
 
 	radius_client_deinit(e->radius);
 	os_free(e->last_eap_radius);
-	if (e->last_recv_radius) {
-		radius_msg_free(e->last_recv_radius);
-		os_free(e->last_recv_radius);
-	}
+	radius_msg_free(e->last_recv_radius);
+	e->last_recv_radius = NULL;
 	os_free(e->eap_identity);
 	e->eap_identity = NULL;
 	eapol_sm_deinit(wpa_s->eapol);
@@ -669,10 +712,11 @@ ieee802_1x_receive_auth(struct radius_msg *msg, struct radius_msg *req,
 			void *data)
 {
 	struct eapol_test_data *e = data;
+	struct radius_hdr *hdr = radius_msg_get_hdr(msg);
 
 	/* RFC 2869, Ch. 5.13: valid Message-Authenticator attribute MUST be
 	 * present when packet contains an EAP-Message attribute */
-	if (msg->hdr->code == RADIUS_CODE_ACCESS_REJECT &&
+	if (hdr->code == RADIUS_CODE_ACCESS_REJECT &&
 	    radius_msg_get_attr(msg, RADIUS_ATTR_MESSAGE_AUTHENTICATOR, NULL,
 				0) < 0 &&
 	    radius_msg_get_attr(msg, RADIUS_ATTR_EAP_MESSAGE, NULL, 0) < 0) {
@@ -686,9 +730,9 @@ ieee802_1x_receive_auth(struct radius_msg *msg, struct radius_msg *req,
 		return RADIUS_RX_UNKNOWN;
 	}
 
-	if (msg->hdr->code != RADIUS_CODE_ACCESS_ACCEPT &&
-	    msg->hdr->code != RADIUS_CODE_ACCESS_REJECT &&
-	    msg->hdr->code != RADIUS_CODE_ACCESS_CHALLENGE) {
+	if (hdr->code != RADIUS_CODE_ACCESS_ACCEPT &&
+	    hdr->code != RADIUS_CODE_ACCESS_REJECT &&
+	    hdr->code != RADIUS_CODE_ACCESS_CHALLENGE) {
 		printf("Unknown RADIUS message code\n");
 		return RADIUS_RX_UNKNOWN;
 	}
@@ -696,14 +740,10 @@ ieee802_1x_receive_auth(struct radius_msg *msg, struct radius_msg *req,
 	e->radius_identifier = -1;
 	wpa_printf(MSG_DEBUG, "RADIUS packet matching with station");
 
-	if (e->last_recv_radius) {
-		radius_msg_free(e->last_recv_radius);
-		os_free(e->last_recv_radius);
-	}
-
+	radius_msg_free(e->last_recv_radius);
 	e->last_recv_radius = msg;
 
-	switch (msg->hdr->code) {
+	switch (hdr->code) {
 	case RADIUS_CODE_ACCESS_ACCEPT:
 		e->radius_access_accept_received = 1;
 		ieee802_1x_get_keys(e, msg, req, shared_secret,
@@ -716,9 +756,9 @@ ieee802_1x_receive_auth(struct radius_msg *msg, struct radius_msg *req,
 
 	ieee802_1x_decapsulate_radius(e);
 
-	if ((msg->hdr->code == RADIUS_CODE_ACCESS_ACCEPT &&
+	if ((hdr->code == RADIUS_CODE_ACCESS_ACCEPT &&
 	     e->eapol_test_num_reauths < 0) ||
-	    msg->hdr->code == RADIUS_CODE_ACCESS_REJECT) {
+	    hdr->code == RADIUS_CODE_ACCESS_REJECT) {
 		eloop_terminate();
 	}
 
@@ -816,7 +856,7 @@ static int scard_test(void)
 	unsigned char aka_ik[IK_LEN];
 	unsigned char aka_ck[CK_LEN];
 
-	scard = scard_init(SCARD_TRY_BOTH);
+	scard = scard_init(SCARD_TRY_BOTH, NULL);
 	if (scard == NULL)
 		return -1;
 	if (scard_set_pin(scard, "1234")) {
@@ -830,6 +870,9 @@ static int scard_test(void)
 		goto failed;
 	wpa_hexdump_ascii(MSG_DEBUG, "SCARD: IMSI", (u8 *) imsi, len);
 	/* NOTE: Permanent Username: 1 | IMSI */
+
+	wpa_printf(MSG_DEBUG, "SCARD: MNC length %d",
+		   scard_get_mnc_len(scard));
 
 	os_memset(_rand, 0, sizeof(_rand));
 	if (scard_gsm_auth(scard, _rand, sres, kc))
@@ -913,7 +956,7 @@ static int scard_get_triplets(int argc, char *argv[])
 		wpa_debug_level = 99;
 	}
 
-	scard = scard_init(SCARD_GSM_SIM_ONLY);
+	scard = scard_init(SCARD_GSM_SIM_ONLY, NULL);
 	if (scard == NULL) {
 		printf("Failed to open smartcard connection\n");
 		return -1;
@@ -956,10 +999,9 @@ static int scard_get_triplets(int argc, char *argv[])
 }
 
 
-static void eapol_test_terminate(int sig, void *eloop_ctx,
-				 void *signal_ctx)
+static void eapol_test_terminate(int sig, void *signal_ctx)
 {
-	struct wpa_supplicant *wpa_s = eloop_ctx;
+	struct wpa_supplicant *wpa_s = signal_ctx;
 	wpa_msg(wpa_s, MSG_INFO, "Signal %d received - terminating", sig);
 	eloop_terminate();
 }
@@ -971,7 +1013,7 @@ static void usage(void)
 	       "eapol_test [-nWS] -c<conf> [-a<AS IP>] [-p<AS port>] "
 	       "[-s<AS secret>]\\\n"
 	       "           [-r<count>] [-t<timeout>] [-C<Connect-Info>] \\\n"
-	       "           [-M<client MAC address>] \\\n"
+	       "           [-M<client MAC address>] [-o<server cert file] \\\n"
 	       "           [-N<attr spec>] \\\n"
 	       "           [-A<client IP>]\n"
 	       "eapol_test scard\n"
@@ -997,6 +1039,8 @@ static void usage(void)
 	       "  -M<client MAC address> = Set own MAC address "
 	       "(Calling-Station-Id,\n"
 	       "                           default: 02:00:00:00:00:01)\n"
+	       "  -o<server cert file> = Write received server certificate\n"
+	       "                         chain to the specified file\n"
 	       "  -N<attr spec> = send arbitrary attribute specified by:\n"
 	       "                  attr_id:syntax:value or attr_id\n"
 	       "                  attr_id - number id of the attribute\n"
@@ -1038,7 +1082,7 @@ int main(int argc, char *argv[])
 	wpa_debug_show_keys = 1;
 
 	for (;;) {
-		c = getopt(argc, argv, "a:A:c:C:M:nN:p:r:s:St:W");
+		c = getopt(argc, argv, "a:A:c:C:M:nN:o:p:r:s:St:W");
 		if (c < 0)
 			break;
 		switch (c) {
@@ -1062,6 +1106,16 @@ int main(int argc, char *argv[])
 			break;
 		case 'n':
 			eapol_test.no_mppe_keys++;
+			break;
+		case 'o':
+			if (eapol_test.server_cert_file)
+				fclose(eapol_test.server_cert_file);
+			eapol_test.server_cert_file = fopen(optarg, "w");
+			if (eapol_test.server_cert_file == NULL) {
+				printf("Could not open '%s' for writing\n",
+				       optarg);
+				return -1;
+			}
 			break;
 		case 'p':
 			as_port = atoi(optarg);
@@ -1130,12 +1184,12 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	if (eap_peer_register_methods()) {
+	if (eap_register_methods()) {
 		wpa_printf(MSG_ERROR, "Failed to register EAP methods");
 		return -1;
 	}
 
-	if (eloop_init(&wpa_s)) {
+	if (eloop_init()) {
 		wpa_printf(MSG_ERROR, "Failed to initialize event loop");
 		return -1;
 	}
@@ -1178,8 +1232,8 @@ int main(int argc, char *argv[])
 	eloop_register_timeout(timeout, 0, eapol_test_timeout, &eapol_test,
 			       NULL);
 	eloop_register_timeout(0, 0, send_eap_request_identity, &wpa_s, NULL);
-	eloop_register_signal_terminate(eapol_test_terminate, NULL);
-	eloop_register_signal_reconfig(eapol_test_terminate, NULL);
+	eloop_register_signal_terminate(eapol_test_terminate, &wpa_s);
+	eloop_register_signal_reconfig(eapol_test_terminate, &wpa_s);
 	eloop_run();
 
 	eloop_cancel_timeout(eapol_test_timeout, &eapol_test, NULL);
@@ -1199,8 +1253,14 @@ int main(int argc, char *argv[])
 	test_eapol_clean(&eapol_test, &wpa_s);
 
 	eap_peer_unregister_methods();
+#ifdef CONFIG_AP
+	eap_server_unregister_methods();
+#endif /* CONFIG_AP */
 
 	eloop_destroy();
+
+	if (eapol_test.server_cert_file)
+		fclose(eapol_test.server_cert_file);
 
 	printf("MPPE keys OK: %d  mismatch: %d\n",
 	       eapol_test.num_mppe_ok, eapol_test.num_mppe_mismatch);
