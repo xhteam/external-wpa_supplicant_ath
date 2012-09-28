@@ -1422,7 +1422,7 @@ ifeq ($(CONFIG_TLS), openssl)
 LOCAL_SHARED_LIBRARIES += libcrypto libssl
 endif
 ifdef CONFIG_DRIVER_NL80211
-LOCAL_SHARED_LIBRARIES += libnl_2
+LOCAL_STATIC_LIBRARIES += libnl_2
 endif
 LOCAL_CFLAGS := $(L_CFLAGS)
 LOCAL_SRC_FILES := $(OBJS)
@@ -1443,23 +1443,24 @@ include $(BUILD_EXECUTABLE)
 #include $(BUILD_EXECUTABLE)
 #
 ########################
-#
-#local_target_dir := $(TARGET_OUT)/etc/wifi
-#
-#include $(CLEAR_VARS)
-#LOCAL_MODULE := wpa_supplicant.conf
-#LOCAL_MODULE_TAGS := user
-#LOCAL_MODULE_CLASS := ETC
-#LOCAL_MODULE_PATH := $(local_target_dir)
-#LOCAL_SRC_FILES := $(LOCAL_MODULE)
-#include $(BUILD_PREBUILT)
-#
-########################
+
+local_target_dir := $(TARGET_OUT)/etc/wifi
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := wpa_supplicant.conf
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_CLASS := ETC
+LOCAL_MODULE_PATH := $(local_target_dir)
+LOCAL_SRC_FILES := $(LOCAL_MODULE)
+include $(BUILD_PREBUILT)
+
+
 
 endif # ifeq ($(WPA_BUILD_SUPPLICANT),true)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE = libwpa_client
+LOCAL_MODULE_TAGS := optional
 LOCAL_CFLAGS = $(L_CFLAGS)
 LOCAL_SRC_FILES = src/common/wpa_ctrl.c src/utils/os_$(CONFIG_OS).c
 LOCAL_C_INCLUDES = $(INCLUDES)
