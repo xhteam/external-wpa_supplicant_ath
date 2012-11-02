@@ -33,7 +33,7 @@ ifeq ($(BOARD_WLAN_DEVICE), bcmdhd)
 L_CFLAGS += -DANDROID_P2P
 endif
 
-ifeq ($(BOARD_WLAN_DEVICE), qcwcn)
+ifeq ($(BOARD_WLAN_DEVICE), ar6003)
 L_CFLAGS += -DANDROID_QCOM_PATCH
 L_CFLAGS += -DANDROID_P2P
 endif
@@ -1450,19 +1450,19 @@ include $(BUILD_EXECUTABLE)
 #LOCAL_C_INCLUDES := $(INCLUDES)
 #include $(BUILD_EXECUTABLE)
 #
-########################
-#
-#local_target_dir := $(TARGET_OUT)/etc/wifi
-#
-#include $(CLEAR_VARS)
-#LOCAL_MODULE := wpa_supplicant.conf
-#LOCAL_MODULE_TAGS := user
-#LOCAL_MODULE_CLASS := ETC
-#LOCAL_MODULE_PATH := $(local_target_dir)
-#LOCAL_SRC_FILES := $(LOCAL_MODULE)
-#include $(BUILD_PREBUILT)
-#
-########################
+
+
+local_target_dir := $(TARGET_OUT)/etc/wifi
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := wpa_supplicant.conf
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_CLASS := ETC
+LOCAL_MODULE_PATH := $(local_target_dir)
+LOCAL_SRC_FILES := $(LOCAL_MODULE)
+include $(BUILD_PREBUILT)
+
+
 
 include $(CLEAR_VARS)
 LOCAL_MODULE = libwpa_client

@@ -3007,7 +3007,6 @@ void wpa_supplicant_deinit(struct wpa_global *global)
 	os_free(global);
 	wpa_debug_close_syslog();
 	wpa_debug_close_file();
-	property_set("wifi.wpa_supp_ready", "0");
 }
 
 

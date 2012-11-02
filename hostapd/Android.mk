@@ -28,7 +28,7 @@ ifeq ($(BOARD_WLAN_DEVICE), bcmdhd)
 L_CFLAGS += -DANDROID_P2P
 endif
 
-ifeq ($(BOARD_WLAN_DEVICE), qcwcn)
+ifeq ($(BOARD_WLAN_DEVICE), ar6003)
 L_CFLAGS += -DANDROID_QCOM_PATCH
 L_CFLAGS += -DANDROID_P2P
 endif
