@@ -4,8 +4,14 @@
  * Copyright (c) 2009-2010, Witold Sowa <witold.sowa@gmail.com>
  * Copyright (c) 2009, Jouni Malinen <j@w1.fi>
  *
- * This software may be distributed under the terms of the BSD license.
- * See README for more details.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * Alternatively, this software may be distributed under the terms of BSD
+ * license.
+ *
+ * See README and COPYING for more details.
  */
 
 #include "includes.h"
@@ -434,76 +440,6 @@ dbus_bool_t wpas_dbus_simple_array_property_getter(DBusMessageIter *iter,
 	if (!dbus_message_iter_close_container(iter, &variant_iter)) {
 		dbus_set_error(error, DBUS_ERROR_FAILED,
 		               "%s: failed to construct message 4", __func__);
-		return FALSE;
-	}
-
-	return TRUE;
-}
-
-
-/**
- * wpas_dbus_simple_array_array_property_getter - Get array array type property
- * @iter: Pointer to incoming dbus message iterator
- * @type: DBus type of property array elements (must be basic type)
- * @array: pointer to array of elements to put into response message
- * @array_len: length of above array
- * @error: a pointer to an error to fill on failure
- * Returns: TRUE if the request succeeded, FALSE if it failed
- *
- * Generic getter for array type properties. Array elements type is
- * required to be basic.
- */
-dbus_bool_t wpas_dbus_simple_array_array_property_getter(DBusMessageIter *iter,
-							 const int type,
-							 struct wpabuf **array,
-							 size_t array_len,
-							 DBusError *error)
-{
-	DBusMessageIter variant_iter, array_iter;
-	char type_str[] = "aa?";
-	char inner_type_str[] = "a?";
-	const char *sub_type_str;
-	size_t i;
-
-	if (!dbus_type_is_basic(type)) {
-		dbus_set_error(error, DBUS_ERROR_FAILED,
-			       "%s: given type is not basic", __func__);
-		return FALSE;
-	}
-
-	sub_type_str = wpa_dbus_type_as_string(type);
-	type_str[2] = sub_type_str[0];
-	inner_type_str[1] = sub_type_str[0];
-
-	if (!dbus_message_iter_open_container(iter, DBUS_TYPE_VARIANT,
-					      type_str, &variant_iter)) {
-		dbus_set_error(error, DBUS_ERROR_FAILED,
-			       "%s: failed to construct message 1", __func__);
-		return FALSE;
-	}
-	if (!dbus_message_iter_open_container(&variant_iter, DBUS_TYPE_ARRAY,
-					      inner_type_str, &array_iter)) {
-		dbus_set_error(error, DBUS_ERROR_FAILED,
-			       "%s: failed to construct message 2", __func__);
-		return FALSE;
-	}
-
-	for (i = 0; i < array_len; i++) {
-		wpa_dbus_dict_bin_array_add_element(&array_iter,
-						    wpabuf_head(array[i]),
-						    wpabuf_len(array[i]));
-
-	}
-
-	if (!dbus_message_iter_close_container(&variant_iter, &array_iter)) {
-		dbus_set_error(error, DBUS_ERROR_FAILED,
-			       "%s: failed to close message 2", __func__);
-		return FALSE;
-	}
-
-	if (!dbus_message_iter_close_container(iter, &variant_iter)) {
-		dbus_set_error(error, DBUS_ERROR_FAILED,
-			       "%s: failed to close message 1", __func__);
 		return FALSE;
 	}
 

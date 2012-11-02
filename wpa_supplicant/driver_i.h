@@ -648,6 +648,16 @@ static inline int wpa_drv_tdls_oper(struct wpa_supplicant *wpa_s,
 	return wpa_s->driver->tdls_oper(wpa_s->drv_priv, oper, peer);
 }
 
+#ifdef ANDROID
+static inline int wpa_drv_driver_cmd(struct wpa_supplicant *wpa_s,
+				     char *cmd, char *buf, size_t buf_len)
+{
+	if (!wpa_s->driver->driver_cmd)
+		return -1;
+	return wpa_s->driver->driver_cmd(wpa_s->drv_priv, cmd, buf, buf_len);
+}
+#endif
+
 static inline void wpa_drv_set_rekey_info(struct wpa_supplicant *wpa_s,
 					  const u8 *kek, const u8 *kck,
 					  const u8 *replay_ctr)
@@ -657,20 +667,13 @@ static inline void wpa_drv_set_rekey_info(struct wpa_supplicant *wpa_s,
 	wpa_s->driver->set_rekey_info(wpa_s->drv_priv, kek, kck, replay_ctr);
 }
 
-static inline int wpa_drv_radio_disable(struct wpa_supplicant *wpa_s,
-					int disabled)
+#ifdef ANDROID_P2P
+static inline int wpa_drv_switch_channel(struct wpa_supplicant *wpa_s,
+					  int freq)
 {
-	if (!wpa_s->driver->radio_disable)
+	if (!wpa_s->driver->switch_channel)
 		return -1;
-	return wpa_s->driver->radio_disable(wpa_s->drv_priv, disabled);
+	return wpa_s->driver->switch_channel(wpa_s->drv_priv, freq);
 }
-
-static inline int wpa_drv_driver_cmd(struct wpa_supplicant *wpa_s,
-				     char *cmd, char *buf, size_t buf_len)
-{
-	if (!wpa_s->driver->driver_cmd)
-		return -1;
-	return wpa_s->driver->driver_cmd(wpa_s->drv_priv, cmd, buf, buf_len);
-}
-
+#endif
 #endif /* DRIVER_I_H */

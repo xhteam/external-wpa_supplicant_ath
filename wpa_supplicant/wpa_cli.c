@@ -80,6 +80,9 @@ static const char *pid_file = NULL;
 static const char *action_file = NULL;
 static int ping_interval = 5;
 static int interactive = 0;
+#if defined(CONFIG_P2P) && defined(ANDROID_P2P)
+static char* redirect_interface = NULL;
+#endif
 
 struct cli_txt_entry {
 	struct dl_list list;
@@ -395,7 +398,14 @@ static void wpa_cli_msg_cb(char *msg, size_t len)
 
 static int _wpa_ctrl_command(struct wpa_ctrl *ctrl, char *cmd, int print)
 {
+#ifdef ANDROID
 	char buf[4096];
+#else		
+	char buf[2048];
+#endif	
+#if defined(CONFIG_P2P) && defined(ANDROID_P2P)
+	char _cmd[256];
+#endif
 	size_t len;
 	int ret;
 
@@ -403,6 +413,22 @@ static int _wpa_ctrl_command(struct wpa_ctrl *ctrl, char *cmd, int print)
 		printf("Not connected to wpa_supplicant - command dropped.\n");
 		return -1;
 	}
+#if defined(CONFIG_P2P) && defined(ANDROID_P2P)
+	if (redirect_interface) {
+		char *arg;
+		arg = os_strchr(cmd, ' ');
+		if (arg) {
+			*arg++ = '\0';
+			ret = os_snprintf(_cmd, sizeof(_cmd), "%s %s %s", cmd, redirect_interface, arg);
+		}
+		else {
+			ret = os_snprintf(_cmd, sizeof(_cmd), "%s %s", cmd, redirect_interface);
+		}
+		cmd = _cmd;
+		os_free(redirect_interface);
+		redirect_interface = NULL;
+	}
+#endif
 	len = sizeof(buf) - 1;
 	ret = wpa_ctrl_request(ctrl, cmd, os_strlen(cmd), buf, &len,
 			       wpa_cli_msg_cb);
@@ -1464,12 +1490,7 @@ static int wpa_cli_cmd_enable_network(struct wpa_ctrl *ctrl, int argc,
 		return -1;
 	}
 
-	if (argc > 1)
-		res = os_snprintf(cmd, sizeof(cmd), "ENABLE_NETWORK %s %s",
-				  argv[0], argv[1]);
-	else
-		res = os_snprintf(cmd, sizeof(cmd), "ENABLE_NETWORK %s",
-				  argv[0]);
+	res = os_snprintf(cmd, sizeof(cmd), "ENABLE_NETWORK %s", argv[0]);
 	if (res < 0 || (size_t) res >= sizeof(cmd))
 		return -1;
 	cmd[sizeof(cmd) - 1] = '\0';
@@ -1602,61 +1623,6 @@ static int wpa_cli_cmd_get_network(struct wpa_ctrl *ctrl, int argc,
 }
 
 
-static int wpa_cli_cmd_list_creds(struct wpa_ctrl *ctrl, int argc,
-				  char *argv[])
-{
-	return wpa_ctrl_command(ctrl, "LIST_CREDS");
-}
-
-
-static int wpa_cli_cmd_add_cred(struct wpa_ctrl *ctrl, int argc, char *argv[])
-{
-	return wpa_ctrl_command(ctrl, "ADD_CRED");
-}
-
-
-static int wpa_cli_cmd_remove_cred(struct wpa_ctrl *ctrl, int argc,
-				   char *argv[])
-{
-	char cmd[32];
-	int res;
-
-	if (argc < 1) {
-		printf("Invalid REMOVE_CRED command: needs one argument "
-		       "(cred id)\n");
-		return -1;
-	}
-
-	res = os_snprintf(cmd, sizeof(cmd), "REMOVE_CRED %s", argv[0]);
-	if (res < 0 || (size_t) res >= sizeof(cmd))
-		return -1;
-	cmd[sizeof(cmd) - 1] = '\0';
-
-	return wpa_ctrl_command(ctrl, cmd);
-}
-
-
-static int wpa_cli_cmd_set_cred(struct wpa_ctrl *ctrl, int argc, char *argv[])
-{
-	char cmd[256];
-	int res;
-
-	if (argc != 3) {
-		printf("Invalid SET_CRED command: needs three arguments\n"
-		       "(cred id, variable name, and value)\n");
-		return -1;
-	}
-
-	res = os_snprintf(cmd, sizeof(cmd), "SET_CRED %s %s %s",
-			  argv[0], argv[1], argv[2]);
-	if (res < 0 || (size_t) res >= sizeof(cmd) - 1) {
-		printf("Too long SET_CRED command.\n");
-		return -1;
-	}
-	return wpa_ctrl_command(ctrl, cmd);
-}
-
-
 static int wpa_cli_cmd_disconnect(struct wpa_ctrl *ctrl, int argc,
 				  char *argv[])
 {
@@ -1696,13 +1662,15 @@ static int wpa_cli_cmd_bss(struct wpa_ctrl *ctrl, int argc, char *argv[])
 	char cmd[64];
 	int res;
 
-	if (argc != 1) {
-		printf("Invalid BSS command: need one argument (index or "
-		       "BSSID)\n");
+	if (argc < 1) {
+		printf("Invalid BSS command: need at least one argument"
+		       "(index or BSSID)\n");
 		return -1;
 	}
 
-	res = os_snprintf(cmd, sizeof(cmd), "BSS %s", argv[0]);
+	res = os_snprintf(cmd, sizeof(cmd), "BSS %s\t%s\t%s", argv[0],
+			  argc > 1 ? argv[1] : "", argc > 2 ? argv[2] : "");
+
 	if (res < 0 || (size_t) res >= sizeof(cmd))
 		return -1;
 	cmd[sizeof(cmd) - 1] = '\0';
@@ -1915,42 +1883,6 @@ static int wpa_cli_cmd_all_sta(struct wpa_ctrl *ctrl, int argc, char *argv[])
 	} while (wpa_ctrl_command_sta(ctrl, cmd, addr, sizeof(addr)) == 0);
 
 	return -1;
-}
-
-
-static int wpa_cli_cmd_deauthenticate(struct wpa_ctrl *ctrl, int argc,
-				      char *argv[])
-{
-	char buf[64];
-	if (argc < 1) {
-		printf("Invalid 'deauthenticate' command - exactly one "
-		       "argument, STA address, is required.\n");
-		return -1;
-	}
-	if (argc > 1)
-		os_snprintf(buf, sizeof(buf), "DEAUTHENTICATE %s %s",
-			    argv[0], argv[1]);
-	else
-		os_snprintf(buf, sizeof(buf), "DEAUTHENTICATE %s", argv[0]);
-	return wpa_ctrl_command(ctrl, buf);
-}
-
-
-static int wpa_cli_cmd_disassociate(struct wpa_ctrl *ctrl, int argc,
-				    char *argv[])
-{
-	char buf[64];
-	if (argc < 1) {
-		printf("Invalid 'disassociate' command - exactly one "
-		       "argument, STA address, is required.\n");
-		return -1;
-	}
-	if (argc > 1)
-		os_snprintf(buf, sizeof(buf), "DISASSOCIATE %s %s",
-			    argv[0], argv[1]);
-	else
-		os_snprintf(buf, sizeof(buf), "DISASSOCIATE %s", argv[0]);
-	return wpa_ctrl_command(ctrl, buf);
 }
 #endif /* CONFIG_AP */
 
@@ -2581,49 +2513,26 @@ static int wpa_cli_cmd_p2p_ext_listen(struct wpa_ctrl *ctrl, int argc,
 
 #endif /* CONFIG_P2P */
 
-#ifdef CONFIG_WIFI_DISPLAY
 
-static int wpa_cli_cmd_wfd_subelem_set(struct wpa_ctrl *ctrl, int argc,
-				       char *argv[])
+#ifdef CONFIG_WFD
+static int wpa_cli_cmd_wfd_set(struct wpa_ctrl *ctrl, int argc, char *argv[])
 {
 	char cmd[100];
 	int res;
 
-	if (argc != 1 && argc != 2) {
-		printf("Invalid WFD_SUBELEM_SET command: needs one or two "
-		       "arguments (subelem, hexdump)\n");
+	if (argc != 2) {
+		printf("Invalid WFD_SET command: needs two arguments (field, "
+		       "value)\n");
 		return -1;
 	}
 
-	res = os_snprintf(cmd, sizeof(cmd), "WFD_SUBELEM_SET %s %s",
-			  argv[0], argc > 1 ? argv[1] : "");
+	res = os_snprintf(cmd, sizeof(cmd), "WFD_SET %s %s", argv[0], argv[1]);
 	if (res < 0 || (size_t) res >= sizeof(cmd))
 		return -1;
 	cmd[sizeof(cmd) - 1] = '\0';
 	return wpa_ctrl_command(ctrl, cmd);
 }
-
-
-static int wpa_cli_cmd_wfd_subelem_get(struct wpa_ctrl *ctrl, int argc,
-				       char *argv[])
-{
-	char cmd[100];
-	int res;
-
-	if (argc != 1) {
-		printf("Invalid WFD_SUBELEM_GET command: needs one "
-		       "argument (subelem)\n");
-		return -1;
-	}
-
-	res = os_snprintf(cmd, sizeof(cmd), "WFD_SUBELEM_GET %s",
-			  argv[0]);
-	if (res < 0 || (size_t) res >= sizeof(cmd))
-		return -1;
-	cmd[sizeof(cmd) - 1] = '\0';
-	return wpa_ctrl_command(ctrl, cmd);
-}
-#endif /* CONFIG_WIFI_DISPLAY */
+#endif
 
 
 #ifdef CONFIG_INTERWORKING
@@ -2796,7 +2705,7 @@ static int wpa_cli_cmd_reauthenticate(struct wpa_ctrl *ctrl, int argc,
 	return wpa_ctrl_command(ctrl, "REAUTHENTICATE");
 }
 
-
+#ifdef ANDROID
 static int wpa_cli_cmd_driver(struct wpa_ctrl *ctrl, int argc, char *argv[])
 {
 	char cmd[256];
@@ -2815,7 +2724,7 @@ static int wpa_cli_cmd_driver(struct wpa_ctrl *ctrl, int argc, char *argv[])
 	printf("%s: %s\n", __func__, cmd);
 	return wpa_ctrl_command(ctrl, cmd);
 }
-
+#endif
 
 enum wpa_cli_cmd_flags {
 	cli_cmd_flag_none		= 0x00,
@@ -2939,18 +2848,6 @@ static struct wpa_cli_cmd wpa_cli_commands[] = {
 	{ "get_network", wpa_cli_cmd_get_network,
 	  cli_cmd_flag_none,
 	  "<network id> <variable> = get network variables" },
-	{ "list_creds", wpa_cli_cmd_list_creds,
-	  cli_cmd_flag_none,
-	  "= list configured credentials" },
-	{ "add_cred", wpa_cli_cmd_add_cred,
-	  cli_cmd_flag_none,
-	  "= add a credential" },
-	{ "remove_cred", wpa_cli_cmd_remove_cred,
-	  cli_cmd_flag_none,
-	  "<cred id> = remove a credential" },
-	{ "set_cred", wpa_cli_cmd_set_cred,
-	  cli_cmd_flag_sensitive,
-	  "<cred id> <variable> <value> = set credential variables" },
 	{ "save_config", wpa_cli_cmd_save_config,
 	  cli_cmd_flag_none,
 	  "= save the current configuration" },
@@ -3063,12 +2960,6 @@ static struct wpa_cli_cmd wpa_cli_commands[] = {
 	{ "all_sta", wpa_cli_cmd_all_sta,
 	  cli_cmd_flag_none,
 	  "= get information about all associated stations (AP)" },
-	{ "deauthenticate", wpa_cli_cmd_deauthenticate,
-	  cli_cmd_flag_none,
-	  "<addr> = deauthenticate a station" },
-	{ "disassociate", wpa_cli_cmd_disassociate,
-	  cli_cmd_flag_none,
-	  "<addr> = disassociate a station" },
 #endif /* CONFIG_AP */
 	{ "suspend", wpa_cli_cmd_suspend, cli_cmd_flag_none,
 	  "= notification of suspend/hibernate" },
@@ -3148,12 +3039,10 @@ static struct wpa_cli_cmd wpa_cli_commands[] = {
 	{ "p2p_ext_listen", wpa_cli_cmd_p2p_ext_listen, cli_cmd_flag_none,
 	  "[<period> <interval>] = set extended listen timing" },
 #endif /* CONFIG_P2P */
-#ifdef CONFIG_WIFI_DISPLAY
-	{ "wfd_subelem_set", wpa_cli_cmd_wfd_subelem_set, cli_cmd_flag_none,
-	  "<subelem> [contents] = set Wi-Fi Display subelement" },
-	{ "wfd_subelem_get", wpa_cli_cmd_wfd_subelem_get, cli_cmd_flag_none,
-	  "<subelem> = get Wi-Fi Display subelement" },
-#endif /* CONFIG_WIFI_DISPLAY */
+#ifdef CONFIG_WFD
+	{ "wfd_set", wpa_cli_cmd_wfd_set, cli_cmd_flag_none,
+	  "<field> <value> = set a WFD parameter" },
+#endif
 #ifdef CONFIG_INTERWORKING
 	{ "fetch_anqp", wpa_cli_cmd_fetch_anqp, cli_cmd_flag_none,
 	  "= fetch ANQP information for all APs" },
@@ -3184,9 +3073,11 @@ static struct wpa_cli_cmd wpa_cli_commands[] = {
 	  "= get signal parameters" },
 	{ "reauthenticate", wpa_cli_cmd_reauthenticate, cli_cmd_flag_none,
 	  "= trigger IEEE 802.1X/EAPOL reauthentication" },
+#ifdef ANDROID
 	{ "driver", wpa_cli_cmd_driver,
 	  cli_cmd_flag_none,
 	  "<command> = driver private commands" },
+#endif
 	{ NULL, NULL, cli_cmd_flag_none, NULL }
 };
 
@@ -3347,6 +3238,13 @@ static int wpa_request(struct wpa_ctrl *ctrl, int argc, char *argv[])
 		printf("Unknown command '%s'\n", argv[0]);
 		ret = 1;
 	} else {
+#if defined(CONFIG_P2P) && defined(ANDROID_P2P)
+		if ( (argc >= 2) && (os_strncmp(argv[1], "interface=", 10) == 0)) {
+			redirect_interface = os_strdup(argv[1]);
+			ret = match->handler(ctrl, argc - 2, &argv[2]);
+		}
+		else
+#endif
 		ret = match->handler(ctrl, argc - 1, &argv[1]);
 	}
 
@@ -3789,7 +3687,11 @@ static char * wpa_cli_get_default_ifname(void)
 #endif /* CONFIG_CTRL_IFACE_UNIX */
 
 #ifdef CONFIG_CTRL_IFACE_NAMED_PIPE
+#ifdef ANDROID
 	char buf[4096], *pos;
+#else
+	char buf[2048], *pos;
+#endif
 	size_t len;
 	struct wpa_ctrl *ctrl;
 	int ret;

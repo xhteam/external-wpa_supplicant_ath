@@ -8,13 +8,11 @@
 LOCAL_PATH := $(call my-dir)
 PKG_CONFIG ?= pkg-config
 
-WPA_BUILD_SUPPLICANT := false
 ifneq ($(BOARD_WPA_SUPPLICANT_DRIVER),)
-  WPA_BUILD_SUPPLICANT := true
   CONFIG_DRIVER_$(BOARD_WPA_SUPPLICANT_DRIVER) := y
+else
+  CONFIG_DRIVER_TEST := y
 endif
-
-ifeq ($(WPA_BUILD_SUPPLICANT),true)
 
 include $(LOCAL_PATH)/android.config
 
@@ -32,7 +30,12 @@ L_CFLAGS += -DCONFIG_NO_ROAMING
 endif
 
 ifeq ($(BOARD_WLAN_DEVICE), bcmdhd)
-L_CFLAGS += -DANDROID_BRCM_P2P_PATCH
+L_CFLAGS += -DANDROID_P2P
+endif
+
+ifeq ($(BOARD_WLAN_DEVICE), qcwcn)
+L_CFLAGS += -DANDROID_QCOM_PATCH
+L_CFLAGS += -DANDROID_P2P
 endif
 
 # Use Android specific directory for control interface sockets
@@ -46,9 +49,6 @@ endif
 
 # To allow non-ASCII characters in SSID
 L_CFLAGS += -DWPA_UNICODE_SSID
-
-# OpenSSL is configured without engines on Android
-L_CFLAGS += -DOPENSSL_NO_ENGINE
 
 INCLUDES = $(LOCAL_PATH)
 INCLUDES += $(LOCAL_PATH)/src
@@ -67,7 +67,6 @@ INCLUDES += $(LOCAL_PATH)/src/tls
 INCLUDES += $(LOCAL_PATH)/src/utils
 INCLUDES += $(LOCAL_PATH)/src/wps
 INCLUDES += external/openssl/include
-INCLUDES += frameworks/base/cmds/keystore
 INCLUDES += system/security/keystore
 ifdef CONFIG_DRIVER_NL80211
 INCLUDES += external/libnl-headers
@@ -127,9 +126,16 @@ endif
 OBJS += src/utils/$(CONFIG_ELOOP).c
 OBJS_c += src/utils/$(CONFIG_ELOOP).c
 
+ifdef CONFIG_ELOOP_POLL
+L_CFLAGS += -DCONFIG_ELOOP_POLL
+endif
 
 ifdef CONFIG_EAPOL_TEST
 L_CFLAGS += -Werror -DEAPOL_TEST
+endif
+
+ifdef CONFIG_HT_OVERRIDES
+L_CFLAGS += -DCONFIG_HT_OVERRIDES
 endif
 
 ifndef CONFIG_BACKEND
@@ -238,9 +244,12 @@ L_CFLAGS += -DCONFIG_P2P_STRICT
 endif
 endif
 
-ifdef CONFIG_WIFI_DISPLAY
-L_CFLAGS += -DCONFIG_WIFI_DISPLAY
-OBJS += wifi_display.c
+ifdef CONFIG_WFD
+OBJS += wfd_supplicant.c
+OBJS += src/wfd/wfd.c
+OBJS += src/wfd/wfd_parse.c
+OBJS += src/wfd/wfd_build.c
+L_CFLAGS += -DCONFIG_WFD
 endif
 
 ifdef CONFIG_INTERWORKING
@@ -1414,8 +1423,7 @@ ifdef CONFIG_DRIVER_CUSTOM
 LOCAL_STATIC_LIBRARIES := libCustomWifi
 endif
 ifneq ($(BOARD_WPA_SUPPLICANT_PRIVATE_LIB),)
-##Build as part of wpa_supplicant build now
-##LOCAL_STATIC_LIBRARIES += $(BOARD_WPA_SUPPLICANT_PRIVATE_LIB)
+LOCAL_STATIC_LIBRARIES += $(BOARD_WPA_SUPPLICANT_PRIVATE_LIB)
 endif
 LOCAL_SHARED_LIBRARIES := libc libcutils
 ifeq ($(CONFIG_TLS), openssl)
@@ -1443,24 +1451,21 @@ include $(BUILD_EXECUTABLE)
 #include $(BUILD_EXECUTABLE)
 #
 ########################
-
-local_target_dir := $(TARGET_OUT)/etc/wifi
-
-include $(CLEAR_VARS)
-LOCAL_MODULE := wpa_supplicant.conf
-LOCAL_MODULE_TAGS := optional
-LOCAL_MODULE_CLASS := ETC
-LOCAL_MODULE_PATH := $(local_target_dir)
-LOCAL_SRC_FILES := $(LOCAL_MODULE)
-include $(BUILD_PREBUILT)
-
-
-
-endif # ifeq ($(WPA_BUILD_SUPPLICANT),true)
+#
+#local_target_dir := $(TARGET_OUT)/etc/wifi
+#
+#include $(CLEAR_VARS)
+#LOCAL_MODULE := wpa_supplicant.conf
+#LOCAL_MODULE_TAGS := user
+#LOCAL_MODULE_CLASS := ETC
+#LOCAL_MODULE_PATH := $(local_target_dir)
+#LOCAL_SRC_FILES := $(LOCAL_MODULE)
+#include $(BUILD_PREBUILT)
+#
+########################
 
 include $(CLEAR_VARS)
 LOCAL_MODULE = libwpa_client
-LOCAL_MODULE_TAGS := optional
 LOCAL_CFLAGS = $(L_CFLAGS)
 LOCAL_SRC_FILES = src/common/wpa_ctrl.c src/utils/os_$(CONFIG_OS).c
 LOCAL_C_INCLUDES = $(INCLUDES)

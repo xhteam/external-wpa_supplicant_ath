@@ -210,17 +210,17 @@ struct p2p_peer_info {
 	size_t wps_sec_dev_type_list_len;
 
 	struct wpabuf *wps_vendor_ext[P2P_MAX_WPS_VENDOR_EXT];
-
-	/**
-	 * wfd_subelems - Wi-Fi Display subelements from WFD IE(s)
-	 */
-	struct wpabuf *wfd_subelems;
 };
 
 enum p2p_prov_disc_status {
 	P2P_PROV_DISC_SUCCESS,
 	P2P_PROV_DISC_TIMEOUT,
 	P2P_PROV_DISC_REJECTED,
+};
+
+struct p2p_channel {
+	u8 op_class;
+	u8 chan;
 };
 
 /**
@@ -268,6 +268,16 @@ struct p2p_config {
 	 * numbering of the clases depends on the configured country code.
 	 */
 	struct p2p_channels channels;
+
+	/**
+	 * num_pref_chan - Number of pref_chan entries
+	 */
+	unsigned int num_pref_chan;
+
+	/**
+	 * pref_chan - Preferred channels for GO Negotiation
+	 */
+	struct p2p_channel *pref_chan;
 
 	/**
 	 * pri_dev_type - Primary Device Type (see WPS)
@@ -359,7 +369,6 @@ struct p2p_config {
 	 * @num_req_dev_types: Number of requested device types
 	 * @req_dev_types: Array containing requested device types
 	 * @dev_id: Device ID to search for or %NULL to find all devices
-	 * @pw_id: Device Password ID
 	 * Returns: 0 on success, -1 on failure
 	 *
 	 * This callback function is used to request a P2P scan or search
@@ -383,7 +392,7 @@ struct p2p_config {
 	 */
 	int (*p2p_scan)(void *ctx, enum p2p_scan_type type, int freq,
 			unsigned int num_req_dev_types,
-			const u8 *req_dev_types, const u8 *dev_id, u16 pw_id);
+			const u8 *req_dev_types, const u8 *dev_id);
 
 	/**
 	 * send_probe_resp - Transmit a Probe Response frame
@@ -948,11 +957,6 @@ int p2p_prov_disc_req(struct p2p_data *p2p, const u8 *peer_addr,
 void * p2p_sd_request(struct p2p_data *p2p, const u8 *dst,
 		      const struct wpabuf *tlvs);
 
-#ifdef CONFIG_WIFI_DISPLAY
-void * p2p_sd_request_wfd(struct p2p_data *p2p, const u8 *dst,
-			  const struct wpabuf *tlvs);
-#endif /* CONFIG_WIFI_DISPLAY */
-
 /**
  * p2p_sd_cancel_request - Cancel a pending service discovery query
  * @p2p: P2P module context from p2p_init()
@@ -1083,12 +1087,12 @@ u16 p2p_get_provisioning_info(struct p2p_data *p2p, const u8 *addr);
 /**
  * p2p_clear_provisioning_info - Clear any stored provisioning info
  * @p2p: P2P module context from p2p_init()
- * @iface_addr: Peer P2P Device Address
+ * @iface_addr: Peer P2P Interface Address
  *
  * This function is used to clear stored WPS provisioning info for the given
  * peer.
  */
-void p2p_clear_provisioning_info(struct p2p_data *p2p, const u8 *addr);
+void p2p_clear_provisioning_info(struct p2p_data *p2p, const u8 *iface_addr);
 
 
 /* Event notifications from lower layer driver operations */
@@ -1641,11 +1645,37 @@ int p2p_set_oper_channel(struct p2p_data *p2p, u8 op_reg_class, u8 op_channel,
 			 int cfg_op_channel);
 
 /**
+ * p2p_set_pref_chan - Set P2P preferred channel list
+ * @p2p: P2P module context from p2p_init()
+ * @num_pref_chan: Number of entries in pref_chan list
+ * @pref_chan: Preferred channels or %NULL to remove preferences
+ * Returns: 0 on success, -1 on failure
+ */
+int p2p_set_pref_chan(struct p2p_data *p2p, unsigned int num_pref_chan,
+		      const struct p2p_channel *pref_chan);
+
+/**
  * p2p_in_progress - Check whether a P2P operation is progress
  * @p2p: P2P module context from p2p_init()
  * Returns: 0 if P2P module is idle or 1 if an operation is in progress
  */
 int p2p_in_progress(struct p2p_data *p2p);
+
+#ifdef ANDROID_P2P
+/**
+ * p2p_search_in_progress - Check whether a P2P SEARCH is in progress
+ * @p2p: P2P module context from p2p_init()
+ * Returns: 0 if P2P module is idle or 1 if an operation is in progress
+ */
+int p2p_search_in_progress(struct p2p_data *p2p);
+
+/**
+ * p2p_search_pending - Check whether there is a deferred P2P SEARCH
+ * @p2p: P2P module context from p2p_init()
+ * Returns: 0 if there is no deferred P2P search or 1 if there is one
+ */
+int p2p_search_pending(struct p2p_data *p2p);
+#endif
 
 /**
  * p2p_other_scan_completed - Notify completion of non-P2P scan
@@ -1656,18 +1686,13 @@ int p2p_other_scan_completed(struct p2p_data *p2p);
 
 const char * p2p_wps_method_text(enum p2p_wps_method method);
 
-int p2p_set_wfd_ie_beacon(struct p2p_data *p2p, struct wpabuf *ie);
-int p2p_set_wfd_ie_probe_req(struct p2p_data *p2p, struct wpabuf *ie);
-int p2p_set_wfd_ie_probe_resp(struct p2p_data *p2p, struct wpabuf *ie);
-int p2p_set_wfd_ie_assoc_req(struct p2p_data *p2p, struct wpabuf *ie);
-int p2p_set_wfd_ie_invitation(struct p2p_data *p2p, struct wpabuf *ie);
-int p2p_set_wfd_ie_prov_disc_req(struct p2p_data *p2p, struct wpabuf *ie);
-int p2p_set_wfd_ie_prov_disc_resp(struct p2p_data *p2p, struct wpabuf *ie);
-int p2p_set_wfd_ie_go_neg(struct p2p_data *p2p, struct wpabuf *ie);
-int p2p_set_wfd_dev_info(struct p2p_data *p2p, const struct wpabuf *elem);
-int p2p_set_wfd_assoc_bssid(struct p2p_data *p2p, const struct wpabuf *elem);
-int p2p_set_wfd_coupled_sink_info(struct p2p_data *p2p,
-				  const struct wpabuf *elem);
-struct wpabuf * wifi_display_encaps(struct wpabuf *subelems);
+#ifdef CONFIG_WFD
+/**
+ * p2p_set_wfd_data - Store WFD module context for use by P2P
+ * @p2p: P2P module context from p2p_init()
+ * @wfd: WFD module context from wfd_init()
+ */
+void p2p_set_wfd_data(struct p2p_data *p2p, void *wfd);
+#endif
 
 #endif /* P2P_H */

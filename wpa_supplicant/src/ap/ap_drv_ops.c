@@ -12,7 +12,6 @@
 #include "drivers/driver.h"
 #include "common/ieee802_11_defs.h"
 #include "wps/wps.h"
-#include "p2p/p2p.h"
 #include "hostapd.h"
 #include "ieee802_11.h"
 #include "sta_info.h"
@@ -110,6 +109,15 @@ int hostapd_build_ap_extra_ies(struct hostapd_data *hapd,
 	}
 #endif /* CONFIG_P2P */
 
+#ifdef CONFIG_WFD
+	if (hapd->wfd_assoc_resp_ie) {
+		if (wpabuf_resize(&assocresp, wpabuf_len(hapd->wfd_assoc_resp_ie)) <
+		    0)
+			goto fail;
+		wpabuf_put_buf(assocresp, hapd->wfd_assoc_resp_ie);
+	}
+#endif /* CONFIG_P2P */
+
 #ifdef CONFIG_P2P_MANAGER
 	if (hapd->conf->p2p & P2P_MANAGE) {
 		if (wpabuf_resize(&beacon, 100) == 0) {
@@ -147,16 +155,6 @@ int hostapd_build_ap_extra_ies(struct hostapd_data *hapd,
 		}
 	}
 #endif /* CONFIG_P2P_MANAGER */
-
-#ifdef CONFIG_WIFI_DISPLAY
-	if (hapd->p2p_group) {
-		struct wpabuf *a;
-		a = p2p_group_assoc_resp_ie(hapd->p2p_group, P2P_SC_SUCCESS);
-		if (a && wpabuf_resize(&assocresp, wpabuf_len(a)) == 0)
-			wpabuf_put_buf(assocresp, a);
-		wpabuf_free(a);
-	}
-#endif /* CONFIG_WIFI_DISPLAY */
 
 	*beacon_ret = beacon;
 	*proberesp_ret = proberesp;
@@ -594,16 +592,4 @@ int hostapd_drv_sta_disassoc(struct hostapd_data *hapd,
 		return 0;
 	return hapd->driver->sta_disassoc(hapd->drv_priv, hapd->own_addr, addr,
 					  reason);
-}
-
-
-int hostapd_drv_send_action(struct hostapd_data *hapd, unsigned int freq,
-			    unsigned int wait, const u8 *dst, const u8 *data,
-			    size_t len)
-{
-	if (hapd->driver == NULL || hapd->driver->send_action == NULL)
-		return 0;
-	return hapd->driver->send_action(hapd->drv_priv, freq, wait, dst,
-					 hapd->own_addr, hapd->own_addr, data,
-					 len, 0);
 }

@@ -46,22 +46,15 @@ static struct wpabuf * p2p_build_prov_disc_req(struct p2p_data *p2p,
 {
 	struct wpabuf *buf;
 	u8 *len;
-	size_t extra = 0;
 
-#ifdef CONFIG_WIFI_DISPLAY
-	if (p2p->wfd_ie_prov_disc_req)
-		extra = wpabuf_len(p2p->wfd_ie_prov_disc_req);
-#endif /* CONFIG_WIFI_DISPLAY */
-
-	buf = wpabuf_alloc(1000 + extra);
+	buf = wpabuf_alloc(1000);
 	if (buf == NULL)
 		return NULL;
 
 	p2p_buf_add_public_action_hdr(buf, P2P_PROV_DISC_REQ, dialog_token);
 
 	len = p2p_buf_add_ie_hdr(buf);
-	p2p_buf_add_capability(buf, p2p->dev_capab &
-			       ~P2P_DEV_CAPAB_CLIENT_DISCOVERABILITY, 0);
+	p2p_buf_add_capability(buf, p2p->dev_capab, 0);
 	p2p_buf_add_device_info(buf, p2p, NULL);
 	if (go) {
 		p2p_buf_add_group_id(buf, go->info.p2p_device_addr,
@@ -72,10 +65,9 @@ static struct wpabuf * p2p_build_prov_disc_req(struct p2p_data *p2p,
 	/* WPS IE with Config Methods attribute */
 	p2p_build_wps_ie_config_methods(buf, config_methods);
 
-#ifdef CONFIG_WIFI_DISPLAY
-	if (p2p->wfd_ie_prov_disc_req)
-		wpabuf_put_buf(buf, p2p->wfd_ie_prov_disc_req);
-#endif /* CONFIG_WIFI_DISPLAY */
+#ifdef CONFIG_WFD
+	wfd_add_wfd_ie(p2p->cfg->cb_ctx, p2p->wfd, buf);
+#endif
 
 	return buf;
 }
@@ -83,35 +75,11 @@ static struct wpabuf * p2p_build_prov_disc_req(struct p2p_data *p2p,
 
 static struct wpabuf * p2p_build_prov_disc_resp(struct p2p_data *p2p,
 						u8 dialog_token,
-						u16 config_methods,
-						const u8 *group_id,
-						size_t group_id_len)
+						u16 config_methods)
 {
 	struct wpabuf *buf;
-	size_t extra = 0;
 
-#ifdef CONFIG_WIFI_DISPLAY
-	struct wpabuf *wfd_ie = p2p->wfd_ie_prov_disc_resp;
-	if (wfd_ie && group_id) {
-		size_t i;
-		for (i = 0; i < p2p->num_groups; i++) {
-			struct p2p_group *g = p2p->groups[i];
-			struct wpabuf *ie;
-			if (!p2p_group_is_group_id_match(g, group_id,
-							 group_id_len))
-				continue;
-			ie = p2p_group_get_wfd_ie(g);
-			if (ie) {
-				wfd_ie = ie;
-				break;
-			}
-		}
-	}
-	if (wfd_ie)
-		extra = wpabuf_len(wfd_ie);
-#endif /* CONFIG_WIFI_DISPLAY */
-
-	buf = wpabuf_alloc(100 + extra);
+	buf = wpabuf_alloc(100);
 	if (buf == NULL)
 		return NULL;
 
@@ -120,10 +88,9 @@ static struct wpabuf * p2p_build_prov_disc_resp(struct p2p_data *p2p,
 	/* WPS IE with Config Methods attribute */
 	p2p_build_wps_ie_config_methods(buf, config_methods);
 
-#ifdef CONFIG_WIFI_DISPLAY
-	if (wfd_ie)
-		wpabuf_put_buf(buf, wfd_ie);
-#endif /* CONFIG_WIFI_DISPLAY */
+#ifdef CONFIG_WFD
+	wfd_add_wfd_ie(p2p->cfg->cb_ctx, p2p->wfd, buf);
+#endif
 
 	return buf;
 }
@@ -157,9 +124,6 @@ void p2p_process_prov_disc_req(struct p2p_data *p2p, const u8 *sa,
 			        "P2P: Provision Discovery Request add device "
 				"failed " MACSTR, MAC2STR(sa));
 		}
-	} else if (msg.wfd_subelems) {
-		wpabuf_free(dev->info.wfd_subelems);
-		dev->info.wfd_subelems = wpabuf_dup(msg.wfd_subelems);
 	}
 
 	if (!(msg.wps_config_methods &
@@ -205,8 +169,7 @@ void p2p_process_prov_disc_req(struct p2p_data *p2p, const u8 *sa,
 
 out:
 	resp = p2p_build_prov_disc_resp(p2p, msg.dialog_token,
-					reject ? 0 : msg.wps_config_methods,
-					msg.group_id, msg.group_id_len);
+					reject ? 0 : msg.wps_config_methods);
 	if (resp == NULL) {
 		p2p_parse_free(&msg);
 		return;

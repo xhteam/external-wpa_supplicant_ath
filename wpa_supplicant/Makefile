@@ -227,9 +227,12 @@ CFLAGS += -DCONFIG_P2P_STRICT
 endif
 endif
 
-ifdef CONFIG_WIFI_DISPLAY
-CFLAGS += -DCONFIG_WIFI_DISPLAY
-OBJS += wifi_display.o
+ifdef CONFIG_WFD
+OBJS += wfd_supplicant.o
+OBJS += ./src/wfd/wfd.o
+OBJS += ./src/wfd/wfd_parse.o
+OBJS += ./src/wfd/wfd_build.o
+CFLAGS += -DCONFIG_WFD
 endif
 
 ifdef CONFIG_INTERWORKING
@@ -732,9 +735,6 @@ ifdef CONFIG_WPS
 CFLAGS += -DEAP_SERVER_WSC
 OBJS += ../src/ap/wps_hostapd.o
 OBJS += ../src/eap_server/eap_server_wsc.o
-endif
-ifdef CONFIG_INTERWORKING
-OBJS += ../src/ap/gas_serv.o
 endif
 endif
 

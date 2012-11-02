@@ -25,8 +25,17 @@ L_CFLAGS += -DVERSION_STR_POSTFIX=\"-$(PLATFORM_VERSION)\"
 L_CFLAGS += -DANDROID_LOG_NAME=\"hostapd\"
 
 ifeq ($(BOARD_WLAN_DEVICE), bcmdhd)
-L_CFLAGS += -DANDROID_BRCM_P2P_PATCH
+L_CFLAGS += -DANDROID_P2P
 endif
+
+ifeq ($(BOARD_WLAN_DEVICE), qcwcn)
+L_CFLAGS += -DANDROID_QCOM_PATCH
+L_CFLAGS += -DANDROID_P2P
+endif
+
+# Use Android specific directory for control interface sockets
+L_CFLAGS += -DCONFIG_CTRL_IFACE_CLIENT_DIR=\"/data/misc/wifi/sockets\"
+L_CFLAGS += -DCONFIG_CTRL_IFACE_DIR=\"/data/misc/wifi/hostapd\"
 
 # To force sizeof(enum) = 4
 ifeq ($(TARGET_ARCH),arm)
@@ -36,14 +45,11 @@ endif
 # To allow non-ASCII characters in SSID
 L_CFLAGS += -DWPA_UNICODE_SSID
 
-# OpenSSL is configured without engines on Android
-L_CFLAGS += -DOPENSSL_NO_ENGINE
-
 INCLUDES = $(LOCAL_PATH)
 INCLUDES += $(LOCAL_PATH)/src
 INCLUDES += $(LOCAL_PATH)/src/utils
 INCLUDES += external/openssl/include
-INCLUDES += frameworks/base/cmds/keystore
+INCLUDES += system/security/keystore
 ifdef CONFIG_DRIVER_NL80211
 INCLUDES += external/libnl-headers
 endif
@@ -824,8 +830,7 @@ ifdef CONFIG_DRIVER_CUSTOM
 LOCAL_STATIC_LIBRARIES := libCustomWifi
 endif
 ifneq ($(BOARD_HOSTAPD_PRIVATE_LIB),)
-##Build as part of hostapd build now
-##LOCAL_STATIC_LIBRARIES += $(BOARD_HOSTAPD_PRIVATE_LIB)
+LOCAL_STATIC_LIBRARIES += $(BOARD_HOSTAPD_PRIVATE_LIB)
 endif
 LOCAL_SHARED_LIBRARIES := libc libcutils libcrypto libssl
 ifdef CONFIG_DRIVER_NL80211

@@ -1175,59 +1175,76 @@ static int parse_roaming_consortium(struct hostapd_bss_config *bss, char *pos,
 
 	return 0;
 }
-
-
-static int parse_venue_name(struct hostapd_bss_config *bss, char *pos,
-			    int line)
-{
-	char *sep;
-	size_t clen, nlen;
-	struct hostapd_venue_name *vn;
-
-	sep = os_strchr(pos, ':');
-	if (sep == NULL)
-		goto fail;
-	*sep++ = '\0';
-
-	clen = os_strlen(pos);
-	if (clen < 2)
-		goto fail;
-	nlen = os_strlen(sep);
-	if (nlen > 252)
-		goto fail;
-
-	vn = os_realloc(bss->venue_name,
-			sizeof(struct hostapd_venue_name) *
-			(bss->venue_name_count + 1));
-	if (vn == NULL)
-		return -1;
-
-	bss->venue_name = vn;
-	vn = &bss->venue_name[bss->venue_name_count];
-	bss->venue_name_count++;
-
-	os_memset(vn->lang, 0, sizeof(vn->lang));
-	os_memcpy(vn->lang, pos, clen);
-	vn->name_len = nlen;
-	os_memcpy(vn->name, sep, nlen);
-
-	return 0;
-
-fail:
-	wpa_printf(MSG_ERROR, "Line %d: Invalid venue_name '%s'",
-		   line, pos);
-	return -1;
-}
 #endif /* CONFIG_INTERWORKING */
 
 
-static int hostapd_config_fill(struct hostapd_config *conf,
-			       struct hostapd_bss_config *bss,
-			       char *buf, char *pos, int line)
+/**
+ * hostapd_config_read - Read and parse a configuration file
+ * @fname: Configuration file name (including path, if needed)
+ * Returns: Allocated configuration data structure
+ */
+struct hostapd_config * hostapd_config_read(const char *fname)
 {
+	struct hostapd_config *conf;
+	struct hostapd_bss_config *bss;
+	FILE *f;
+	char buf[256], *pos;
+	int line = 0;
 	int errors = 0;
+	int pairwise;
+	size_t i;
 
-	{
+	f = fopen(fname, "r");
+	if (f == NULL) {
+		wpa_printf(MSG_ERROR, "Could not open configuration file '%s' "
+			   "for reading.", fname);
+		return NULL;
+	}
+
+	conf = hostapd_config_defaults();
+	if (conf == NULL) {
+		fclose(f);
+		return NULL;
+	}
+
+	/* set default driver based on configuration */
+	conf->driver = wpa_drivers[0];
+	if (conf->driver == NULL) {
+		wpa_printf(MSG_ERROR, "No driver wrappers registered!");
+		hostapd_config_free(conf);
+		fclose(f);
+		return NULL;
+	}
+
+	bss = conf->last_bss = conf->bss;
+
+	while (fgets(buf, sizeof(buf), f)) {
+		bss = conf->last_bss;
+		line++;
+
+		if (buf[0] == '#')
+			continue;
+		pos = buf;
+		while (*pos != '\0') {
+			if (*pos == '\n') {
+				*pos = '\0';
+				break;
+			}
+			pos++;
+		}
+		if (buf[0] == '\0')
+			continue;
+
+		pos = os_strchr(buf, '=');
+		if (pos == NULL) {
+			wpa_printf(MSG_ERROR, "Line %d: invalid line '%s'",
+				   line, buf);
+			errors++;
+			continue;
+		}
+		*pos = '\0';
+		pos++;
+
 		if (os_strcmp(buf, "interface") == 0) {
 			os_strlcpy(conf->bss[0].iface, pos,
 				   sizeof(conf->bss[0].iface));
@@ -1429,7 +1446,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 					   "allocate memory for "
 					   "eap_req_id_text", line);
 				errors++;
-				return errors;
+				continue;
 			}
 			bss->eap_req_id_text_len =
 				os_strlen(bss->eap_req_id_text);
@@ -1588,8 +1605,6 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 			} else {
 				os_free(bss->ssid.wpa_passphrase);
 				bss->ssid.wpa_passphrase = os_strdup(pos);
-				os_free(bss->ssid.wpa_psk);
-				bss->ssid.wpa_psk = NULL;
 			}
 		} else if (os_strcmp(buf, "wpa_psk") == 0) {
 			os_free(bss->ssid.wpa_psk);
@@ -1605,8 +1620,6 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 				errors++;
 			} else {
 				bss->ssid.wpa_psk->group = 1;
-				os_free(bss->ssid.wpa_passphrase);
-				bss->ssid.wpa_passphrase = NULL;
 			}
 		} else if (os_strcmp(buf, "wpa_psk_file") == 0) {
 			os_free(bss->ssid.wpa_psk_file);
@@ -1677,7 +1690,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 				wpa_printf(MSG_DEBUG, "Line %d: Invalid "
 					   "mobility_domain '%s'", line, pos);
 				errors++;
-				return errors;
+				continue;
 			}
 		} else if (os_strcmp(buf, "r1_key_holder") == 0) {
 			if (os_strlen(pos) != 2 * FT_R1KH_ID_LEN ||
@@ -1686,7 +1699,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 				wpa_printf(MSG_DEBUG, "Line %d: Invalid "
 					   "r1_key_holder '%s'", line, pos);
 				errors++;
-				return errors;
+				continue;
 			}
 		} else if (os_strcmp(buf, "r0_key_lifetime") == 0) {
 			bss->r0_key_lifetime = atoi(pos);
@@ -1697,14 +1710,14 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 				wpa_printf(MSG_DEBUG, "Line %d: Invalid "
 					   "r0kh '%s'", line, pos);
 				errors++;
-				return errors;
+				continue;
 			}
 		} else if (os_strcmp(buf, "r1kh") == 0) {
 			if (add_r1kh(bss, pos) < 0) {
 				wpa_printf(MSG_DEBUG, "Line %d: Invalid "
 					   "r1kh '%s'", line, pos);
 				errors++;
-				return errors;
+				continue;
 			}
 		} else if (os_strcmp(buf, "pmk_r1_push") == 0) {
 			bss->pmk_r1_push = atoi(pos);
@@ -1728,7 +1741,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 				wpa_printf(MSG_DEBUG, "ctrl_interface_group=%d"
 					   " (from group name '%s')",
 					   bss->ctrl_interface_gid, group);
-				return errors;
+				continue;
 			}
 
 			/* Group name not found - try to parse this as gid */
@@ -1737,7 +1750,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 				wpa_printf(MSG_DEBUG, "Line %d: Invalid group "
 					   "'%s'", line, group);
 				errors++;
-				return errors;
+				continue;
 			}
 			bss->ctrl_interface_gid_set = 1;
 			wpa_printf(MSG_DEBUG, "ctrl_interface_group=%d",
@@ -2116,7 +2129,7 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 				wpa_printf(MSG_DEBUG, "Line %d: invalid "
 					   "time_zone", line);
 				errors++;
-				return errors;
+				continue;
 			}
 			os_free(bss->time_zone);
 			bss->time_zone = os_strdup(pos);
@@ -2156,13 +2169,6 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 		} else if (os_strcmp(buf, "roaming_consortium") == 0) {
 			if (parse_roaming_consortium(bss, pos, line) < 0)
 				errors++;
-		} else if (os_strcmp(buf, "venue_name") == 0) {
-			if (parse_venue_name(bss, pos, line) < 0)
-				errors++;
-		} else if (os_strcmp(buf, "gas_frag_limit") == 0) {
-			bss->gas_frag_limit = atoi(pos);
-		} else if (os_strcmp(buf, "gas_comeback_delay") == 0) {
-			bss->gas_comeback_delay = atoi(pos);
 #endif /* CONFIG_INTERWORKING */
 #ifdef CONFIG_RADIUS_TEST
 		} else if (os_strcmp(buf, "dump_msk_file") == 0) {
@@ -2176,141 +2182,64 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 		}
 	}
 
-	return errors;
-}
-
-
-static void hostapd_set_security_params(struct hostapd_bss_config *bss)
-{
-	int pairwise;
-
-	if (bss->individual_wep_key_len == 0) {
-		/* individual keys are not use; can use key idx0 for
-		 * broadcast keys */
-		bss->broadcast_key_idx_min = 0;
-	}
-
-	/* Select group cipher based on the enabled pairwise cipher
-	 * suites */
-	pairwise = 0;
-	if (bss->wpa & 1)
-		pairwise |= bss->wpa_pairwise;
-	if (bss->wpa & 2) {
-		if (bss->rsn_pairwise == 0)
-			bss->rsn_pairwise = bss->wpa_pairwise;
-		pairwise |= bss->rsn_pairwise;
-	}
-	if (pairwise & WPA_CIPHER_TKIP)
-		bss->wpa_group = WPA_CIPHER_TKIP;
-	else
-		bss->wpa_group = WPA_CIPHER_CCMP;
-
-	bss->radius->auth_server = bss->radius->auth_servers;
-	bss->radius->acct_server = bss->radius->acct_servers;
-
-	if (bss->wpa && bss->ieee802_1x) {
-		bss->ssid.security_policy = SECURITY_WPA;
-	} else if (bss->wpa) {
-		bss->ssid.security_policy = SECURITY_WPA_PSK;
-	} else if (bss->ieee802_1x) {
-		int cipher = WPA_CIPHER_NONE;
-		bss->ssid.security_policy = SECURITY_IEEE_802_1X;
-		bss->ssid.wep.default_len = bss->default_wep_key_len;
-		if (bss->default_wep_key_len)
-			cipher = bss->default_wep_key_len >= 13 ?
-				WPA_CIPHER_WEP104 : WPA_CIPHER_WEP40;
-		bss->wpa_group = cipher;
-		bss->wpa_pairwise = cipher;
-		bss->rsn_pairwise = cipher;
-	} else if (bss->ssid.wep.keys_set) {
-		int cipher = WPA_CIPHER_WEP40;
-		if (bss->ssid.wep.len[0] >= 13)
-			cipher = WPA_CIPHER_WEP104;
-		bss->ssid.security_policy = SECURITY_STATIC_WEP;
-		bss->wpa_group = cipher;
-		bss->wpa_pairwise = cipher;
-		bss->rsn_pairwise = cipher;
-	} else {
-		bss->ssid.security_policy = SECURITY_PLAINTEXT;
-		bss->wpa_group = WPA_CIPHER_NONE;
-		bss->wpa_pairwise = WPA_CIPHER_NONE;
-		bss->rsn_pairwise = WPA_CIPHER_NONE;
-	}
-}
-
-
-/**
- * hostapd_config_read - Read and parse a configuration file
- * @fname: Configuration file name (including path, if needed)
- * Returns: Allocated configuration data structure
- */
-struct hostapd_config * hostapd_config_read(const char *fname)
-{
-	struct hostapd_config *conf;
-	struct hostapd_bss_config *bss;
-	FILE *f;
-	char buf[256], *pos;
-	int line = 0;
-	int errors = 0;
-	size_t i;
-
-	f = fopen(fname, "r");
-	if (f == NULL) {
-		wpa_printf(MSG_ERROR, "Could not open configuration file '%s' "
-			   "for reading.", fname);
-		return NULL;
-	}
-
-	conf = hostapd_config_defaults();
-	if (conf == NULL) {
-		fclose(f);
-		return NULL;
-	}
-
-	/* set default driver based on configuration */
-	conf->driver = wpa_drivers[0];
-	if (conf->driver == NULL) {
-		wpa_printf(MSG_ERROR, "No driver wrappers registered!");
-		hostapd_config_free(conf);
-		fclose(f);
-		return NULL;
-	}
-
-	bss = conf->last_bss = conf->bss;
-
-	while (fgets(buf, sizeof(buf), f)) {
-		bss = conf->last_bss;
-		line++;
-
-		if (buf[0] == '#')
-			continue;
-		pos = buf;
-		while (*pos != '\0') {
-			if (*pos == '\n') {
-				*pos = '\0';
-				break;
-			}
-			pos++;
-		}
-		if (buf[0] == '\0')
-			continue;
-
-		pos = os_strchr(buf, '=');
-		if (pos == NULL) {
-			wpa_printf(MSG_ERROR, "Line %d: invalid line '%s'",
-				   line, buf);
-			errors++;
-			continue;
-		}
-		*pos = '\0';
-		pos++;
-		errors += hostapd_config_fill(conf, bss, buf, pos, line);
-	}
-
 	fclose(f);
 
-	for (i = 0; i < conf->num_bss; i++)
-		hostapd_set_security_params(&conf->bss[i]);
+	for (i = 0; i < conf->num_bss; i++) {
+		bss = &conf->bss[i];
+
+		if (bss->individual_wep_key_len == 0) {
+			/* individual keys are not use; can use key idx0 for
+			 * broadcast keys */
+			bss->broadcast_key_idx_min = 0;
+		}
+
+		/* Select group cipher based on the enabled pairwise cipher
+		 * suites */
+		pairwise = 0;
+		if (bss->wpa & 1)
+			pairwise |= bss->wpa_pairwise;
+		if (bss->wpa & 2) {
+			if (bss->rsn_pairwise == 0)
+				bss->rsn_pairwise = bss->wpa_pairwise;
+			pairwise |= bss->rsn_pairwise;
+		}
+		if (pairwise & WPA_CIPHER_TKIP)
+			bss->wpa_group = WPA_CIPHER_TKIP;
+		else
+			bss->wpa_group = WPA_CIPHER_CCMP;
+
+		bss->radius->auth_server = bss->radius->auth_servers;
+		bss->radius->acct_server = bss->radius->acct_servers;
+
+		if (bss->wpa && bss->ieee802_1x) {
+			bss->ssid.security_policy = SECURITY_WPA;
+		} else if (bss->wpa) {
+			bss->ssid.security_policy = SECURITY_WPA_PSK;
+		} else if (bss->ieee802_1x) {
+			int cipher = WPA_CIPHER_NONE;
+			bss->ssid.security_policy = SECURITY_IEEE_802_1X;
+			bss->ssid.wep.default_len = bss->default_wep_key_len;
+			if (bss->default_wep_key_len)
+				cipher = bss->default_wep_key_len >= 13 ?
+					WPA_CIPHER_WEP104 : WPA_CIPHER_WEP40;
+			bss->wpa_group = cipher;
+			bss->wpa_pairwise = cipher;
+			bss->rsn_pairwise = cipher;
+		} else if (bss->ssid.wep.keys_set) {
+			int cipher = WPA_CIPHER_WEP40;
+			if (bss->ssid.wep.len[0] >= 13)
+				cipher = WPA_CIPHER_WEP104;
+			bss->ssid.security_policy = SECURITY_STATIC_WEP;
+			bss->wpa_group = cipher;
+			bss->wpa_pairwise = cipher;
+			bss->rsn_pairwise = cipher;
+		} else {
+			bss->ssid.security_policy = SECURITY_PLAINTEXT;
+			bss->wpa_group = WPA_CIPHER_NONE;
+			bss->wpa_pairwise = WPA_CIPHER_NONE;
+			bss->rsn_pairwise = WPA_CIPHER_NONE;
+		}
+	}
 
 	if (hostapd_config_check(conf))
 		errors++;
@@ -2325,29 +2254,4 @@ struct hostapd_config * hostapd_config_read(const char *fname)
 #endif /* WPA_IGNORE_CONFIG_ERRORS */
 
 	return conf;
-}
-
-
-int hostapd_set_iface(struct hostapd_config *conf,
-		      struct hostapd_bss_config *bss, char *field, char *value)
-{
-	int errors = 0;
-	size_t i;
-
-	errors = hostapd_config_fill(conf, bss, field, value, 0);
-	if (errors) {
-		wpa_printf(MSG_INFO, "Failed to set configuration field '%s' "
-			   "to value '%s'", field, value);
-		return -1;
-	}
-
-	for (i = 0; i < conf->num_bss; i++)
-		hostapd_set_security_params(&conf->bss[i]);
-
-	if (hostapd_config_check(conf)) {
-		wpa_printf(MSG_ERROR, "Configuration check failed");
-		errors++;
-	}
-
-	return 0;
 }

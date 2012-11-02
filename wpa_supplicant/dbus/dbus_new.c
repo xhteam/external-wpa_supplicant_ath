@@ -4,8 +4,14 @@
  * Copyright (c) 2009-2010, Witold Sowa <witold.sowa@gmail.com>
  * Copyright (c) 2009, Jouni Malinen <j@w1.fi>
  *
- * This software may be distributed under the terms of the BSD license.
- * See README for more details.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * Alternatively, this software may be distributed under the terms of BSD
+ * license.
+ *
+ * See README and COPYING for more details.
  */
 
 #include "includes.h"
@@ -2915,11 +2921,11 @@ static const struct wpa_dbus_property_desc wpas_dbus_p2p_peer_properties[] = {
 	  wpas_dbus_getter_p2p_peer_group_capability,
 	  NULL
 	},
-	{ "SecondaryDeviceTypes", WPAS_DBUS_NEW_IFACE_P2P_PEER, "aay",
+	{ "SecondaryDeviceTypes", WPAS_DBUS_NEW_IFACE_P2P_PEER, "ay",
 	  wpas_dbus_getter_p2p_peer_secondary_device_types,
 	  NULL
 	},
-	{ "VendorExtension", WPAS_DBUS_NEW_IFACE_P2P_PEER, "aay",
+	{ "VendorExtension", WPAS_DBUS_NEW_IFACE_P2P_PEER, "as",
 	  wpas_dbus_getter_p2p_peer_vendor_extension,
 	  NULL
 	},
@@ -3120,37 +3126,10 @@ static const struct wpa_dbus_property_desc wpas_dbus_p2p_group_properties[] = {
 	  wpas_dbus_getter_p2p_group_members,
 	  NULL
 	},
-	{ "Group", WPAS_DBUS_NEW_IFACE_P2P_GROUP, "o",
-	  wpas_dbus_getter_p2p_group,
-	  NULL
-	},
-	{ "Role", WPAS_DBUS_NEW_IFACE_P2P_GROUP, "s",
-	  wpas_dbus_getter_p2p_role,
-	  NULL
-	},
-	{ "SSID", WPAS_DBUS_NEW_IFACE_P2P_GROUP, "ay",
-	  wpas_dbus_getter_p2p_group_ssid,
-	  NULL
-	},
-	{ "BSSID", WPAS_DBUS_NEW_IFACE_P2P_GROUP, "ay",
-	  wpas_dbus_getter_p2p_group_bssid,
-	  NULL
-	},
-	{ "Frequency", WPAS_DBUS_NEW_IFACE_P2P_GROUP, "q",
-	  wpas_dbus_getter_p2p_group_frequency,
-	  NULL
-	},
-	{ "Passphrase", WPAS_DBUS_NEW_IFACE_P2P_GROUP, "s",
-	  wpas_dbus_getter_p2p_group_passphrase,
-	  NULL
-	},
-	{ "PSK", WPAS_DBUS_NEW_IFACE_P2P_GROUP, "ay",
-	  wpas_dbus_getter_p2p_group_psk,
-	  NULL
-	},
-	{ "WPSVendorExtensions", WPAS_DBUS_NEW_IFACE_P2P_GROUP, "aay",
-	  wpas_dbus_getter_p2p_group_vendor_ext,
-	  wpas_dbus_setter_p2p_group_vendor_ext
+	{ "Properties",
+	  WPAS_DBUS_NEW_IFACE_P2P_GROUP, "a{sv}",
+	  wpas_dbus_getter_p2p_group_properties,
+	  wpas_dbus_setter_p2p_group_properties
 	},
 	{ NULL, NULL, NULL, NULL, NULL }
 };
@@ -3272,6 +3251,10 @@ void wpas_dbus_unregister_p2p_group(struct wpa_supplicant *wpa_s,
 
 static const struct wpa_dbus_property_desc
 wpas_dbus_p2p_groupmember_properties[] = {
+	{ "Properties", WPAS_DBUS_NEW_IFACE_P2P_GROUPMEMBER, "a{sv}",
+	  wpas_dbus_getter_p2p_group_properties,
+	  NULL
+	},
 	{ NULL, NULL, NULL, NULL, NULL }
 };
 

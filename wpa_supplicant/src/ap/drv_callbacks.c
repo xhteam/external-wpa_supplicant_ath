@@ -86,11 +86,8 @@ int hostapd_notif_assoc(struct hostapd_data *hapd, const u8 *addr,
 		sta->timeout_next = STA_NULLFUNC;
 	} else {
 		sta = ap_sta_add(hapd, addr);
-		if (sta == NULL) {
-			hostapd_drv_sta_disassoc(hapd, addr,
-						 WLAN_REASON_DISASSOC_AP_BUSY);
+		if (sta == NULL)
 			return -1;
-		}
 	}
 	sta->flags &= ~(WLAN_STA_WPS | WLAN_STA_MAYBE_WPS | WLAN_STA_WPS2);
 

@@ -15,6 +15,7 @@ struct wpa_driver_ops;
 struct wpa_ctrl_dst;
 struct radius_server_data;
 struct upnp_wps_device_sm;
+struct hapd_interfaces;
 struct hostapd_data;
 struct sta_info;
 struct hostap_sta_driver_data;
@@ -22,12 +23,6 @@ struct ieee80211_ht_capabilities;
 struct full_dynamic_vlan;
 enum wps_event;
 union wps_event_data;
-
-struct hapd_interfaces {
-	size_t count;
-	struct hostapd_iface **iface;
-};
-
 
 struct hostapd_probereq_cb {
 	int (*cb)(void *ctx, const u8 *sa, const u8 *da, const u8 *bssid,
@@ -169,9 +164,10 @@ struct hostapd_data {
 	int noa_start;
 	int noa_duration;
 #endif /* CONFIG_P2P */
-#ifdef CONFIG_INTERWORKING
-	size_t gas_frag_limit;
-#endif /* CONFIG_INTERWORKING */
+
+#ifdef CONFIG_WFD
+	struct wpabuf *wfd_assoc_resp_ie;
+#endif
 };
 
 
@@ -250,9 +246,6 @@ struct hostapd_iface {
 };
 
 /* hostapd.c */
-int hostapd_for_each_interface(struct hapd_interfaces *interfaces,
-			       int (*cb)(struct hostapd_iface *iface,
-					 void *ctx), void *ctx);
 int hostapd_reload_config(struct hostapd_iface *iface);
 struct hostapd_data *
 hostapd_alloc_bss_data(struct hostapd_iface *hapd_iface,

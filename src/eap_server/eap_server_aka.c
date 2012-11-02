@@ -1,6 +1,6 @@
 /*
- * hostapd / EAP-AKA (RFC 4187) and EAP-AKA' (RFC 5448)
- * Copyright (c) 2005-2012, Jouni Malinen <j@w1.fi>
+ * hostapd / EAP-AKA (RFC 4187) and EAP-AKA' (draft-arkko-eap-aka-kdf)
+ * Copyright (c) 2005-2008, Jouni Malinen <j@w1.fi>
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -292,23 +292,12 @@ static int eap_aka_build_encr(struct eap_sm *sm, struct eap_aka_data *data,
 			      const u8 *nonce_s)
 {
 	os_free(data->next_pseudonym);
-	if (nonce_s == NULL) {
-		data->next_pseudonym =
-			eap_sim_db_get_next_pseudonym(
-				sm->eap_sim_db_priv,
-				data->eap_method == EAP_TYPE_AKA_PRIME ?
-				EAP_SIM_DB_AKA_PRIME : EAP_SIM_DB_AKA);
-	} else {
-		/* Do not update pseudonym during re-authentication */
-		data->next_pseudonym = NULL;
-	}
+	data->next_pseudonym =
+		eap_sim_db_get_next_pseudonym(sm->eap_sim_db_priv, 1);
 	os_free(data->next_reauth_id);
 	if (data->counter <= EAP_AKA_MAX_FAST_REAUTHS) {
 		data->next_reauth_id =
-			eap_sim_db_get_next_reauth_id(
-				sm->eap_sim_db_priv,
-				data->eap_method == EAP_TYPE_AKA_PRIME ?
-				EAP_SIM_DB_AKA_PRIME : EAP_SIM_DB_AKA);
+			eap_sim_db_get_next_reauth_id(sm->eap_sim_db_priv, 1);
 	} else {
 		wpa_printf(MSG_DEBUG, "EAP-AKA: Max fast re-authentication "
 			   "count exceeded - force full authentication");
@@ -626,8 +615,7 @@ static void eap_aka_determine_identity(struct eap_sm *sm,
 		identity = data->reauth->identity;
 		identity_len = data->reauth->identity_len;
 	} else if (sm->identity && sm->identity_len > 0 &&
-		   (sm->identity[0] == EAP_AKA_PERMANENT_PREFIX ||
-		    sm->identity[0] == EAP_AKA_PRIME_PERMANENT_PREFIX)) {
+		   sm->identity[0] == EAP_AKA_PERMANENT_PREFIX) {
 		identity = sm->identity;
 		identity_len = sm->identity_len;
 	} else {
@@ -1029,6 +1017,11 @@ static void eap_aka_process_reauth(struct eap_sm *sm,
 		identity_len = id2_len;
 	}
 
+	if (data->next_pseudonym) {
+		eap_sim_db_add_pseudonym(sm->eap_sim_db_priv, identity,
+					 identity_len, data->next_pseudonym);
+		data->next_pseudonym = NULL;
+	}
 	if (data->next_reauth_id) {
 		if (data->eap_method == EAP_TYPE_AKA_PRIME) {
 #ifdef EAP_SERVER_AKA_PRIME

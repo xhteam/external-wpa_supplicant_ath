@@ -199,12 +199,6 @@ struct p2p_srv_upnp {
 	char *service;
 };
 
-struct wpa_freq_range {
-	unsigned int min;
-	unsigned int max;
-};
-
-
 /**
  * struct wpa_global - Internal, global data for all %wpa_supplicant interfaces
  *
@@ -220,21 +214,22 @@ struct wpa_global {
 	size_t drv_count;
 	struct os_time suspend_time;
 	struct p2p_data *p2p;
-	struct wpa_supplicant *p2p_init_wpa_s;
 	struct wpa_supplicant *p2p_group_formation;
 	u8 p2p_dev_addr[ETH_ALEN];
 	struct dl_list p2p_srv_bonjour; /* struct p2p_srv_bonjour */
 	struct dl_list p2p_srv_upnp; /* struct p2p_srv_upnp */
 	int p2p_disabled;
+#ifdef ANDROID_P2P
+	enum wpa_conc_pref {
+		WPA_CONC_PREF_NOT_SET,
+		WPA_CONC_PREF_STA,
+		WPA_CONC_PREF_P2P
+	} conc_pref;
+#endif
 	int cross_connection;
-	struct wpa_freq_range *p2p_disallow_freq;
-	unsigned int num_p2p_disallow_freq;
-
-#ifdef CONFIG_WIFI_DISPLAY
-	int wifi_display;
-#define MAX_WFD_SUBELEMS 10
-	struct wpabuf *wfd_subelem[MAX_WFD_SUBELEMS];
-#endif /* CONFIG_WIFI_DISPLAY */
+#ifdef CONFIG_WFD
+	struct wfd_data *wfd;
+#endif
 };
 
 
@@ -243,6 +238,17 @@ enum offchannel_send_action_result {
 	OFFCHANNEL_SEND_ACTION_NO_ACK /* Frame was sent, but not acknowledged
 				       */,
 	OFFCHANNEL_SEND_ACTION_FAILED /* Frame was not sent due to a failure */
+};
+
+struct wps_ap_info {
+	u8 bssid[ETH_ALEN];
+	enum wps_ap_info_type {
+		WPS_AP_NOT_SEL_REG,
+		WPS_AP_SEL_REG,
+		WPS_AP_SEL_REG_OUR
+	} type;
+	unsigned int tries;
+	struct os_time last_attempt;
 };
 
 /**
@@ -284,6 +290,9 @@ struct wpa_supplicant {
 	struct wpa_bss *current_bss;
 	int ap_ies_from_associnfo;
 	unsigned int assoc_freq;
+#ifdef ANDROID_P2P
+	unsigned int assoc_retries;
+#endif
 
 	/* Selected configuration (based on Beacon/ProbeResp WPA IE) */
 	int pairwise_cipher;
@@ -294,11 +303,6 @@ struct wpa_supplicant {
 
 	void *drv_priv; /* private data used by driver_ops */
 	void *global_drv_priv;
-
-	u8 *bssid_filter;
-	size_t bssid_filter_count;
-
-	enum { WPA_SETBAND_AUTO, WPA_SETBAND_5G, WPA_SETBAND_2G } setband;
 
 	/* previous scan was wildcard when interleaving between
 	 * wildcard scans and specific SSID scan when max_ssids=1 */
@@ -343,10 +347,6 @@ struct wpa_supplicant {
 			     * previous association event */
 
 	struct scard_data *scard;
-#ifdef PCSC_FUNCS
-	char imsi[20];
-	int mnc_len;
-#endif /* PCSC_FUNCS */
 
 	unsigned char last_eapol_src[ETH_ALEN];
 
@@ -362,7 +362,6 @@ struct wpa_supplicant {
 	int normal_scans; /* normal scans run before sched_scan */
 
 	unsigned int drv_flags;
-	unsigned int drv_enc;
 
 	/*
 	 * A bitmap of supported protocols for probe response offload. See
@@ -511,6 +510,9 @@ struct wpa_supplicant {
 		P2P_GROUP_REMOVAL_REQUESTED,
 		P2P_GROUP_REMOVAL_IDLE_TIMEOUT,
 		P2P_GROUP_REMOVAL_UNAVAILABLE,
+#ifdef ANDROID_P2P
+		P2P_GROUP_REMOVAL_FREQ_CONFLICT,
+#endif
 		P2P_GROUP_REMOVAL_GO_ENDING_SESSION
 	} removal_reason;
 
@@ -520,6 +522,8 @@ struct wpa_supplicant {
 	unsigned int p2p_persistent_group:1;
 	unsigned int p2p_fallback_to_go_neg:1;
 	unsigned int p2p_pd_before_go_neg:1;
+	unsigned int p2p_block_concurrent_scan:1;
+
 	int p2p_persistent_id;
 	int p2p_go_intent;
 	int p2p_connect_freq;
@@ -531,6 +535,9 @@ struct wpa_supplicant {
 	void *bgscan_priv;
 
 	struct wpa_ssid *connect_without_scan;
+	struct wps_ap_info *wps_ap;
+	size_t num_wps_ap;
+	int wps_ap_iter;
 
 	int after_wps;
 	int known_wps_freq;
@@ -611,7 +618,6 @@ int wpa_supplicant_set_bss_expiration_count(struct wpa_supplicant *wpa_s,
 int wpa_supplicant_set_debug_params(struct wpa_global *global,
 				    int debug_level, int debug_timestamp,
 				    int debug_show_keys);
-void free_hw_features(struct wpa_supplicant *wpa_s);
 
 void wpa_show_license(void);
 
@@ -637,27 +643,18 @@ void wpa_supplicant_update_config(struct wpa_supplicant *wpa_s);
 void wpa_supplicant_clear_status(struct wpa_supplicant *wpa_s);
 void wpas_connection_failed(struct wpa_supplicant *wpa_s, const u8 *bssid);
 int wpas_driver_bss_selection(struct wpa_supplicant *wpa_s);
-
-/**
- * wpa_supplicant_ctrl_iface_ctrl_rsp_handle - Handle a control response
- * @wpa_s: Pointer to wpa_supplicant data
- * @ssid: Pointer to the network block the reply is for
- * @field: field the response is a reply for
- * @value: value (ie, password, etc) for @field
- * Returns: 0 on success, non-zero on error
- *
- * Helper function to handle replies to control interface requests.
- */
-int wpa_supplicant_ctrl_iface_ctrl_rsp_handle(struct wpa_supplicant *wpa_s,
-					      struct wpa_ssid *ssid,
-					      const char *field,
-					      const char *value);
+#ifdef ANDROID_P2P
+int wpas_is_p2p_prioritized(struct wpa_supplicant *wpa_s);
+#endif
 
 /* events.c */
 void wpa_supplicant_mark_disassoc(struct wpa_supplicant *wpa_s);
 int wpa_supplicant_connect(struct wpa_supplicant *wpa_s,
 			   struct wpa_bss *selected,
 			   struct wpa_ssid *ssid);
+int wpas_p2p_concurrent_scan_blocked(struct wpa_supplicant *wpa_s);
+void wpas_p2p_block_concurrent_scan(struct wpa_supplicant *wpa_s);
+void wpas_p2p_unblock_concurrent_scan(struct wpa_supplicant *wpa_s);
 void wpa_supplicant_stop_countermeasures(void *eloop_ctx, void *sock_ctx);
 void wpa_supplicant_delayed_mic_error_report(void *eloop_ctx, void *sock_ctx);
 
@@ -673,7 +670,5 @@ static inline int network_is_persistent_group(struct wpa_ssid *ssid)
 {
 	return ((ssid->disabled == 2) || ssid->p2p_persistent_group);
 }
-
-int wpas_network_disabled(struct wpa_supplicant *wpa_s, struct wpa_ssid *ssid);
 
 #endif /* WPA_SUPPLICANT_I_H */

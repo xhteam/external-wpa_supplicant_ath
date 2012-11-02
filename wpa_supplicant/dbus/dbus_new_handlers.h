@@ -3,8 +3,14 @@
  * Copyright (c) 2006, Dan Williams <dcbw@redhat.com> and Red Hat, Inc.
  * Copyright (c) 2009-2010, Witold Sowa <witold.sowa@gmail.com>
  *
- * This software may be distributed under the terms of the BSD license.
- * See README for more details.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * Alternatively, this software may be distributed under the terms of BSD
+ * license.
+ *
+ * See README and COPYING for more details.
  */
 
 #ifndef CTRL_IFACE_DBUS_NEW_HANDLERS_H
@@ -34,12 +40,6 @@ dbus_bool_t wpas_dbus_simple_array_property_getter(DBusMessageIter *iter,
 						   const void *array,
 						   size_t array_len,
 						   DBusError *error);
-
-dbus_bool_t wpas_dbus_simple_array_array_property_getter(DBusMessageIter *iter,
-							 const int type,
-							 struct wpabuf **array,
-							 size_t array_len,
-							 DBusError *error);
 
 DBusMessage * wpas_dbus_handler_create_interface(DBusMessage *message,
 						 struct wpa_global *global);

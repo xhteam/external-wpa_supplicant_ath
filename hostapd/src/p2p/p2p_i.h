@@ -11,6 +11,9 @@
 
 #include "utils/list.h"
 #include "p2p.h"
+#ifdef CONFIG_WFD
+#include "wfd/wfd.h"
+#endif
 
 enum p2p_go_state {
 	UNKNOWN_GO,
@@ -28,6 +31,10 @@ struct p2p_device {
 	enum p2p_wps_method wps_method;
 
 	struct p2p_peer_info info;
+
+#ifdef CONFIG_WFD
+	struct wfd_peer_info wfd_info;
+#endif
 
 	/*
 	 * If the peer was discovered based on an interface address (e.g., GO
@@ -109,7 +116,6 @@ struct p2p_sd_query {
 	struct p2p_sd_query *next;
 	u8 peer[ETH_ALEN];
 	int for_all_peers;
-	int wsd; /* Wi-Fi Display Service Discovery Request */
 	struct wpabuf *tlvs;
 };
 
@@ -224,6 +230,14 @@ struct p2p_data {
 	 * devices - List of known P2P Device peers
 	 */
 	struct dl_list devices;
+
+#ifdef ANDROID_P2P
+	/**
+	 * sd_dev_list - device pointer to be serviced next
+	 * for service discovery
+	 */
+	struct dl_list *sd_dev_list;
+#endif
 
 	/**
 	 * go_neg_peer - Pointer to GO Negotiation peer
@@ -426,19 +440,12 @@ struct p2p_data {
 	 */
 	int pd_retries;
 
-#ifdef CONFIG_WIFI_DISPLAY
-	struct wpabuf *wfd_ie_beacon;
-	struct wpabuf *wfd_ie_probe_req;
-	struct wpabuf *wfd_ie_probe_resp;
-	struct wpabuf *wfd_ie_assoc_req;
-	struct wpabuf *wfd_ie_invitation;
-	struct wpabuf *wfd_ie_prov_disc_req;
-	struct wpabuf *wfd_ie_prov_disc_resp;
-	struct wpabuf *wfd_ie_go_neg;
-	struct wpabuf *wfd_dev_info;
-	struct wpabuf *wfd_assoc_bssid;
-	struct wpabuf *wfd_coupled_sink_info;
-#endif /* CONFIG_WIFI_DISPLAY */
+#ifdef CONFIG_WFD
+	/**
+	* wfd - WFD module data
+	*/
+	struct wfd_data *wfd;
+#endif
 };
 
 /**
@@ -447,7 +454,6 @@ struct p2p_data {
 struct p2p_message {
 	struct wpabuf *p2p_attributes;
 	struct wpabuf *wps_attributes;
-	struct wpabuf *wfd_subelems;
 
 	u8 dialog_token;
 
@@ -568,8 +574,6 @@ u8 p2p_group_presence_req(struct p2p_group *group,
 			  const u8 *noa, size_t noa_len);
 int p2p_group_is_group_id_match(struct p2p_group *group, const u8 *group_id,
 				size_t group_id_len);
-void p2p_group_update_ies(struct p2p_group *group);
-struct wpabuf * p2p_group_get_wfd_ie(struct p2p_group *g);
 
 
 void p2p_buf_add_action_hdr(struct wpabuf *buf, u8 subtype, u8 dialog_token);
@@ -601,7 +605,7 @@ void p2p_buf_add_noa(struct wpabuf *buf, u8 noa_index, u8 opp_ps, u8 ctwindow,
 void p2p_buf_add_ext_listen_timing(struct wpabuf *buf, u16 period,
 				   u16 interval);
 void p2p_buf_add_p2p_interface(struct wpabuf *buf, struct p2p_data *p2p);
-void p2p_build_wps_ie(struct p2p_data *p2p, struct wpabuf *buf, int pw_id,
+void p2p_build_wps_ie(struct p2p_data *p2p, struct wpabuf *buf, u16 pw_id,
 		      int all_attr);
 
 /* p2p_sd.c */
@@ -629,7 +633,6 @@ void p2p_process_go_neg_resp(struct p2p_data *p2p, const u8 *sa,
 void p2p_process_go_neg_conf(struct p2p_data *p2p, const u8 *sa,
 			     const u8 *data, size_t len);
 int p2p_connect_send(struct p2p_data *p2p, struct p2p_device *dev);
-u16 p2p_wps_method_pw_id(enum p2p_wps_method wps_method);
 
 /* p2p_pd.c */
 void p2p_process_prov_disc_req(struct p2p_data *p2p, const u8 *sa,

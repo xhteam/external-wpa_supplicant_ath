@@ -57,7 +57,7 @@ static int wpa_supplicant_select_config(struct wpa_supplicant *wpa_s)
 		return -1;
 	}
 
-	if (wpas_network_disabled(wpa_s, ssid)) {
+	if (ssid->disabled) {
 		wpa_dbg(wpa_s, MSG_DEBUG, "Selected network is disabled");
 		return -1;
 	}
@@ -116,13 +116,12 @@ void wpa_supplicant_mark_disassoc(struct wpa_supplicant *wpa_s)
 		return;
 
 	wpa_supplicant_set_state(wpa_s, WPA_DISCONNECTED);
+#ifdef ANDROID
 	wpa_s->conf->ap_scan = DEFAULT_AP_SCAN;
+#endif
 	bssid_changed = !is_zero_ether_addr(wpa_s->bssid);
 	os_memset(wpa_s->bssid, 0, ETH_ALEN);
 	os_memset(wpa_s->pending_bssid, 0, ETH_ALEN);
-#ifdef CONFIG_SME
-	wpa_s->sme.prev_bssid_set = 0;
-#endif /* CONFIG_SME */
 #ifdef CONFIG_P2P
 	os_memset(wpa_s->go_dev_addr, 0, ETH_ALEN);
 #endif /* CONFIG_P2P */
@@ -242,8 +241,7 @@ int wpa_supplicant_scard_init(struct wpa_supplicant *wpa_s,
 			if (eap->vendor == EAP_VENDOR_IETF) {
 				if (eap->method == EAP_TYPE_SIM)
 					sim = 1;
-				else if (eap->method == EAP_TYPE_AKA ||
-					 eap->method == EAP_TYPE_AKA_PRIME)
+				else if (eap->method == EAP_TYPE_AKA)
 					aka = 1;
 			}
 			eap++;
@@ -252,9 +250,7 @@ int wpa_supplicant_scard_init(struct wpa_supplicant *wpa_s,
 
 	if (eap_peer_get_eap_method(EAP_VENDOR_IETF, EAP_TYPE_SIM) == NULL)
 		sim = 0;
-	if (eap_peer_get_eap_method(EAP_VENDOR_IETF, EAP_TYPE_AKA) == NULL &&
-	    eap_peer_get_eap_method(EAP_VENDOR_IETF, EAP_TYPE_AKA_PRIME) ==
-	    NULL)
+	if (eap_peer_get_eap_method(EAP_VENDOR_IETF, EAP_TYPE_AKA) == NULL)
 		aka = 0;
 
 	if (!sim && !aka) {
@@ -273,7 +269,7 @@ int wpa_supplicant_scard_init(struct wpa_supplicant *wpa_s,
 	else
 		type = SCARD_GSM_SIM_ONLY;
 
-	wpa_s->scard = scard_init(type, NULL);
+	wpa_s->scard = scard_init(type);
 	if (wpa_s->scard == NULL) {
 		wpa_msg(wpa_s, MSG_WARNING, "Failed to initialize SIM "
 			"(pcsc-lite)");
@@ -616,7 +612,7 @@ static struct wpa_ssid * wpa_scan_res_match(struct wpa_supplicant *wpa_s,
 	e = wpa_blacklist_get(wpa_s, bss->bssid);
 	if (e) {
 		int limit = 1;
-		if (wpa_supplicant_enabled_networks(wpa_s) == 1) {
+		if (wpa_supplicant_enabled_networks(wpa_s->conf) == 1) {
 			/*
 			 * When only a single network is enabled, we can
 			 * trigger blacklisting on the first failure. This
@@ -644,7 +640,7 @@ static struct wpa_ssid * wpa_scan_res_match(struct wpa_supplicant *wpa_s,
 	for (ssid = group; ssid; ssid = ssid->pnext) {
 		int check_ssid = wpa ? 1 : (ssid->ssid_len != 0);
 
-		if (wpas_network_disabled(wpa_s, ssid)) {
+		if (ssid->disabled) {
 			wpa_dbg(wpa_s, MSG_DEBUG, "   skip - disabled");
 			continue;
 		}
@@ -809,7 +805,7 @@ wpa_supplicant_pick_network(struct wpa_supplicant *wpa_s,
 static void wpa_supplicant_req_new_scan(struct wpa_supplicant *wpa_s,
 					int timeout_sec, int timeout_usec)
 {
-	if (!wpa_supplicant_enabled_networks(wpa_s)) {
+	if (!wpa_supplicant_enabled_networks(wpa_s->conf)) {
 		/*
 		 * No networks are enabled; short-circuit request so
 		 * we don't wait timeout seconds before transitioning
@@ -880,7 +876,7 @@ wpa_supplicant_pick_new_network(struct wpa_supplicant *wpa_s)
 	for (prio = 0; prio < wpa_s->conf->num_prio; prio++) {
 		for (ssid = wpa_s->conf->pssid[prio]; ssid; ssid = ssid->pnext)
 		{
-			if (wpas_network_disabled(wpa_s, ssid))
+			if (ssid->disabled)
 				continue;
 			if (ssid->mode == IEEE80211_MODE_IBSS ||
 			    ssid->mode == IEEE80211_MODE_AP)
@@ -993,15 +989,20 @@ static int wpa_supplicant_need_to_roam(struct wpa_supplicant *wpa_s,
 	}
 
 	return 1;
-#else /* CONFIG_NO_ROAMING */
+#else
 	return 0;
-#endif /* CONFIG_NO_ROAMING */
+#endif
 }
 
 
 /* Return < 0 if no scan results could be fetched. */
+#ifdef ANDROID_P2P
+static int _wpa_supplicant_event_scan_results(struct wpa_supplicant *wpa_s,
+					      union wpa_event_data *data, int suppress_event)
+#else
 static int _wpa_supplicant_event_scan_results(struct wpa_supplicant *wpa_s,
 					      union wpa_event_data *data)
+#endif
 {
 	struct wpa_bss *selected;
 	struct wpa_ssid *ssid = NULL;
@@ -1016,7 +1017,11 @@ static int _wpa_supplicant_event_scan_results(struct wpa_supplicant *wpa_s,
 	wpa_supplicant_notify_scanning(wpa_s, 0);
 
 #ifdef CONFIG_P2P
+#ifdef ANDROID_P2P
+	if (p2p_search_pending(wpa_s->global->p2p) && !wpa_s->global->p2p_disabled &&
+#else
 	if (wpa_s->p2p_cb_on_scan_complete && !wpa_s->global->p2p_disabled &&
+#endif
 	    wpa_s->global->p2p != NULL) {
 		wpa_s->p2p_cb_on_scan_complete = 0;
 		if (p2p_other_scan_completed(wpa_s->global->p2p) == 1) {
@@ -1077,10 +1082,14 @@ static int _wpa_supplicant_event_scan_results(struct wpa_supplicant *wpa_s,
 		wpa_scan_results_free(scan_res);
 		return 0;
 	}
-
-	wpa_dbg(wpa_s, MSG_DEBUG, "New scan results available");
-	wpa_msg_ctrl(wpa_s, MSG_INFO, WPA_EVENT_SCAN_RESULTS);
-	wpas_notify_scan_results(wpa_s);
+#ifdef ANDROID_P2P
+	if(!suppress_event)
+#endif
+	{
+		wpa_dbg(wpa_s, MSG_DEBUG, "New scan results available");
+		wpa_msg_ctrl(wpa_s, MSG_INFO, WPA_EVENT_SCAN_RESULTS);
+		wpas_notify_scan_results(wpa_s);
+	}
 
 	wpas_notify_scan_done(wpa_s, 1);
 
@@ -1100,6 +1109,8 @@ static int _wpa_supplicant_event_scan_results(struct wpa_supplicant *wpa_s,
 		wpa_scan_results_free(scan_res);
 		return 0;
 	}
+
+	wpas_wps_update_ap_info(wpa_s, scan_res);
 
 	selected = wpa_supplicant_pick_network(wpa_s, scan_res, &ssid);
 
@@ -1159,8 +1170,11 @@ static void wpa_supplicant_event_scan_results(struct wpa_supplicant *wpa_s,
 {
 	const char *rn, *rn2;
 	struct wpa_supplicant *ifs;
-
+#ifdef ANDROID_P2P
+	if (_wpa_supplicant_event_scan_results(wpa_s, data, 0) < 0) {
+#else
 	if (_wpa_supplicant_event_scan_results(wpa_s, data) < 0) {
+#endif
 		/*
 		 * If no scan results could be fetched, then no need to
 		 * notify those interfaces that did not actually request
@@ -1191,7 +1205,27 @@ static void wpa_supplicant_event_scan_results(struct wpa_supplicant *wpa_s,
 		if (rn2 && os_strcmp(rn, rn2) == 0) {
 			wpa_printf(MSG_DEBUG, "%s: Updating scan results from "
 				   "sibling", ifs->ifname);
+#ifdef ANDROID_P2P
+			if ( (ifs->drv_flags & WPA_DRIVER_FLAGS_P2P_CAPABLE) || (ifs->p2p_group_interface != NOT_P2P_GROUP_INTERFACE)) {
+				/* Do not update the scan results from STA interface to p2p interfaces */
+				wpa_printf(MSG_DEBUG, "Not Updating scan results on interface %s from "
+					   "sibling %s", ifs->ifname, wpa_s->ifname);
+				continue;
+			}
+			else {
+				/* P2P_FIND will result in too many SCAN_RESULT_EVENTS within
+				 * no time. Avoid announcing it to application as it may not
+				 * be that useful (since results will be that of only 1,6,11).
+				 * over to any other interface as it
+				 */
+				if(p2p_search_in_progress(wpa_s->global->p2p))
+					_wpa_supplicant_event_scan_results(ifs, data, 1);
+				else
+					_wpa_supplicant_event_scan_results(ifs, data, 0);
+			}
+#else
 			_wpa_supplicant_event_scan_results(ifs, data);
+#endif
 		}
 	}
 }
@@ -1592,6 +1626,8 @@ static void wpa_supplicant_event_assoc(struct wpa_supplicant *wpa_s,
 		ibss_rsn_set_psk(wpa_s->ibss_rsn, wpa_s->current_ssid->psk);
 	}
 #endif /* CONFIG_IBSS_RSN */
+
+	wpas_wps_notify_assoc(wpa_s, bssid);
 }
 
 
@@ -1652,7 +1688,11 @@ static void wpa_supplicant_event_disassoc(struct wpa_supplicant *wpa_s,
 			fast_reconnect = wpa_s->current_bss;
 			fast_reconnect_ssid = wpa_s->current_ssid;
 		} else if (wpa_s->wpa_state >= WPA_ASSOCIATING)
+#ifdef ANDROID
 			wpa_supplicant_req_scan(wpa_s, 0, 500000);
+#else
+			wpa_supplicant_req_scan(wpa_s, 0, 100000);
+#endif
 		else
 			wpa_dbg(wpa_s, MSG_DEBUG, "Do not request new "
 				"immediate scan");
@@ -1838,13 +1878,11 @@ wpa_supplicant_event_interface_status(struct wpa_supplicant *wpa_s,
 			wpa_msg(wpa_s, MSG_INFO, "Failed to initialize the "
 				"driver after interface was added");
 		}
-		wpa_supplicant_set_state(wpa_s, WPA_DISCONNECTED);
 		break;
 	case EVENT_INTERFACE_REMOVED:
 		wpa_dbg(wpa_s, MSG_DEBUG, "Configured interface was removed");
 		wpa_s->interface_removed = 1;
 		wpa_supplicant_mark_disassoc(wpa_s);
-		wpa_supplicant_set_state(wpa_s, WPA_INTERFACE_DISABLED);
 		l2_packet_deinit(wpa_s->l2);
 		wpa_s->l2 = NULL;
 #ifdef CONFIG_IBSS_RSN
@@ -2238,6 +2276,25 @@ void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 				data->assoc_reject.status_code);
 		if (wpa_s->drv_flags & WPA_DRIVER_FLAGS_SME)
 			sme_event_assoc_reject(wpa_s, data);
+#ifdef ANDROID_P2P
+		/* If assoc reject is reported by the driver, then avoid
+		 * waiting for  the authentication timeout. Cancel the
+		 * authentication timeout and retry the assoc.
+		 */
+		if(wpa_s->assoc_retries++ < 5) {
+			wpa_printf(MSG_ERROR, "Retrying assoc "
+			"Iteration:%d", wpa_s->assoc_retries);
+			wpa_supplicant_cancel_auth_timeout(wpa_s);
+
+			/* Clear the states */
+			wpa_sm_notify_disassoc(wpa_s->wpa);
+			wpa_supplicant_disassociate(wpa_s, WLAN_REASON_DEAUTH_LEAVING);
+
+			wpa_s->reassociate = 1;
+			wpa_supplicant_req_scan(wpa_s, 1, 0);
+		} else
+			wpa_s->assoc_retries = 0;
+#endif /* ANDROID_P2P */
 		break;
 	case EVENT_AUTH_TIMED_OUT:
 		if (wpa_s->drv_flags & WPA_DRIVER_FLAGS_SME)
@@ -2552,11 +2609,6 @@ void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
 	case EVENT_CHANNEL_LIST_CHANGED:
 		if (wpa_s->drv_priv == NULL)
 			break; /* Ignore event during drv initialization */
-
-		free_hw_features(wpa_s);
-		wpa_s->hw.modes = wpa_drv_get_hw_feature_data(
-			wpa_s, &wpa_s->hw.num_modes, &wpa_s->hw.flags);
-
 #ifdef CONFIG_P2P
 		wpas_p2p_update_channel_list(wpa_s);
 #endif /* CONFIG_P2P */

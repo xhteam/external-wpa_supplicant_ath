@@ -1,6 +1,6 @@
 /*
  * WPA Supplicant / Configuration parser and common functions
- * Copyright (c) 2003-2012, Jouni Malinen <j@w1.fi>
+ * Copyright (c) 2003-2008, Jouni Malinen <j@w1.fi>
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -13,7 +13,11 @@
 #include "crypto/sha1.h"
 #include "rsn_supp/wpa.h"
 #include "eap_peer/eap.h"
+#include "p2p/p2p.h"
 #include "config.h"
+#ifdef CONFIG_WFD
+#include "wfd_supplicant.h"
+#endif
 
 
 #if !defined(CONFIG_CTRL_IFACE) && defined(CONFIG_NO_CONFIG_WRITE)
@@ -219,7 +223,6 @@ static char * wpa_config_write_str(const struct parse_data *data,
 	return wpa_config_write_string((const u8 *) *src, len);
 }
 
-
 #ifdef WPA_UNICODE_SSID
 static char * wpa_config_write_str_unicode(const struct parse_data *data,
 						struct wpa_ssid *ssid)
@@ -238,7 +241,7 @@ static char * wpa_config_write_str_unicode(const struct parse_data *data,
 
 	return wpa_config_write_string_ascii((const u8 *) *src, len);
 }
-#endif /* WPA_UNICODE_SSID */
+#endif
 #endif /* NO_CONFIG_WRITE */
 
 
@@ -1131,7 +1134,6 @@ static int wpa_config_parse_eap(const struct parse_data *data,
 
 	wpa_hexdump(MSG_MSGDUMP, "eap methods",
 		    (u8 *) methods, num_methods * sizeof(*methods));
-	os_free(ssid->eap.eap_methods);
 	ssid->eap.eap_methods = methods;
 	return errors ? -1 : 0;
 }
@@ -1278,11 +1280,6 @@ static int wpa_config_parse_wep_key(u8 *key, size_t *len, int line,
 			   line, idx, value);
 		os_free(buf);
 		return -1;
-	}
-	if (*len && *len != 5 && *len != 13 && *len != 16) {
-		wpa_printf(MSG_ERROR, "Line %d: Invalid WEP key length %u - "
-			   "this network block will be ignored",
-			   line, (unsigned int) *len);
 	}
 	os_memcpy(key, buf, *len);
 	os_free(buf);
@@ -1502,15 +1499,13 @@ static char * wpa_config_write_p2p_client_list(const struct parse_data *data,
 	OFFSET(eap.f), (void *) 0
 #ifdef WPA_UNICODE_SSID
 /* STR_* variants that do not force conversion to ASCII */
-#define _STR_UNICODE(f) #f, wpa_config_parse_str, \
-	wpa_config_write_str_unicode, OFFSET(f)
+#define _STR_UNICODE(f) #f, wpa_config_parse_str, wpa_config_write_str_unicode, OFFSET(f)
 #define STR_UNICODE(f) _STR_UNICODE(f), NULL, NULL, NULL, 0
 #define _STR_LEN_UNICODE(f) _STR_UNICODE(f), OFFSET(f ## _len)
 #define STR_LEN_UNICODE(f) _STR_LEN_UNICODE(f), NULL, NULL, 0
-#define _STR_RANGE_UNICODE(f, min, max) _STR_LEN_UNICODE(f), \
-	(void *) (min), (void *) (max)
+#define _STR_RANGE_UNICODE(f, min, max) _STR_LEN_UNICODE(f), (void *) (min), (void *) (max)
 #define STR_RANGE_UNICODE(f, min, max) _STR_RANGE_UNICODE(f, min, max), 0
-#endif /* WPA_UNICODE_SSID */
+#endif
 #endif /* NO_CONFIG_WRITE */
 
 /* INT: Define an integer variable */
@@ -1557,9 +1552,9 @@ static char * wpa_config_write_p2p_client_list(const struct parse_data *data,
 static const struct parse_data ssid_fields[] = {
 #ifdef WPA_UNICODE_SSID
 	{ STR_RANGE_UNICODE(ssid, 0, MAX_SSID_LEN) },
-#else /* WPA_UNICODE_SSID */
+#else
 	{ STR_RANGE(ssid, 0, MAX_SSID_LEN) },
-#endif /* WPA_UNICODE_SSID */
+#endif
 	{ INT_RANGE(scan_ssid, 0, 1) },
 	{ FUNC(bssid) },
 	{ FUNC_KEY(psk) },
@@ -1631,7 +1626,6 @@ static const struct parse_data ssid_fields[] = {
 	{ INT_RANGE(frequency, 0, 10000) },
 	{ INT(wpa_ptk_rekey) },
 	{ STR(bgscan) },
-	{ INT_RANGE(ignore_broadcast_ssid, 0, 2) },
 #ifdef CONFIG_P2P
 	{ FUNC(p2p_client_list) },
 #endif /* CONFIG_P2P */
@@ -1652,7 +1646,7 @@ static const struct parse_data ssid_fields[] = {
 #undef STR_LEN_UNICODE
 #undef _STR_RANGE_UNICODE
 #undef STR_RANGE_UNICODE
-#endif /* WPA_UNICODE_SSID */
+#endif
 
 #undef OFFSET
 #undef _STR
@@ -1711,13 +1705,12 @@ int wpa_config_add_prio_network(struct wpa_config *config,
 		return -1;
 
 	for (prio = 0; prio < config->num_prio; prio++) {
-		if (nlist[prio]->priority < ssid->priority) {
-			os_memmove(&nlist[prio + 1], &nlist[prio],
-				   (config->num_prio - prio) *
-				   sizeof(struct wpa_ssid *));
+		if (nlist[prio]->priority < ssid->priority)
 			break;
-		}
 	}
+
+	os_memmove(&nlist[prio + 1], &nlist[prio],
+		   (config->num_prio - prio) * sizeof(struct wpa_ssid *));
 
 	nlist[prio] = ssid;
 	config->num_prio++;
@@ -1827,22 +1820,6 @@ void wpa_config_free_ssid(struct wpa_ssid *ssid)
 }
 
 
-void wpa_config_free_cred(struct wpa_cred *cred)
-{
-	os_free(cred->realm);
-	os_free(cred->username);
-	os_free(cred->password);
-	os_free(cred->ca_cert);
-	os_free(cred->client_cert);
-	os_free(cred->private_key);
-	os_free(cred->private_key_passwd);
-	os_free(cred->imsi);
-	os_free(cred->milenage);
-	os_free(cred->domain);
-	os_free(cred);
-}
-
-
 /**
  * wpa_config_free - Free configuration data
  * @config: Configuration data from wpa_config_read()
@@ -1856,20 +1833,12 @@ void wpa_config_free(struct wpa_config *config)
 	struct wpa_config_blob *blob, *prevblob;
 #endif /* CONFIG_NO_CONFIG_BLOBS */
 	struct wpa_ssid *ssid, *prev = NULL;
-	struct wpa_cred *cred, *cprev;
 
 	ssid = config->ssid;
 	while (ssid) {
 		prev = ssid;
 		ssid = ssid->next;
 		wpa_config_free_ssid(prev);
-	}
-
-	cred = config->cred;
-	while (cred) {
-		cprev = cred;
-		cred = cred->next;
-		wpa_config_free_cred(cprev);
 	}
 
 #ifndef CONFIG_NO_CONFIG_BLOBS
@@ -1887,8 +1856,6 @@ void wpa_config_free(struct wpa_config *config)
 	os_free(config->opensc_engine_path);
 	os_free(config->pkcs11_engine_path);
 	os_free(config->pkcs11_module_path);
-	os_free(config->pcsc_reader);
-	os_free(config->pcsc_pin);
 	os_free(config->driver_param);
 	os_free(config->device_name);
 	os_free(config->manufacturer);
@@ -1898,6 +1865,31 @@ void wpa_config_free(struct wpa_config *config)
 	os_free(config->config_methods);
 	os_free(config->p2p_ssid_postfix);
 	os_free(config->pssid);
+	os_free(config->home_realm);
+	os_free(config->home_username);
+	os_free(config->home_password);
+	os_free(config->home_ca_cert);
+	os_free(config->home_imsi);
+	os_free(config->home_milenage);
+#ifdef ANDROID_P2P
+	os_free(config->prioritize);
+#endif
+#ifdef CONFIG_WFD
+	os_free(config->wfd_enable);
+	os_free(config->wfd_device_type);
+	os_free(config->wfd_coupled_sink_supported_by_source);
+	os_free(config->wfd_coupled_sink_supported_by_sink);
+	os_free(config->wfd_available_for_session);
+	os_free(config->wfd_service_discovery_supported);
+	os_free(config->wfd_preferred_connectivity);
+	os_free(config->wfd_content_protection_supported);
+	os_free(config->wfd_time_sync_supported);
+	os_free(config->primarysink_audio_notsupported);
+	os_free(config->source_audio_only_supported);
+	os_free(config->tdls_persistent_group_intended);
+	os_free(config->tdls_persistent_group_reinvoke);
+#endif
+        os_free(config->p2p_pref_chan);
 	os_free(config);
 }
 
@@ -2269,168 +2261,6 @@ void wpa_config_update_psk(struct wpa_ssid *ssid)
 }
 
 
-int wpa_config_set_cred(struct wpa_cred *cred, const char *var,
-			const char *value, int line)
-{
-	char *val;
-	size_t len;
-
-	if (os_strcmp(var, "priority") == 0) {
-		cred->priority = atoi(value);
-		return 0;
-	}
-
-	if (os_strcmp(var, "pcsc") == 0) {
-		cred->pcsc = atoi(value);
-		return 0;
-	}
-
-	val = wpa_config_parse_string(value, &len);
-	if (val == NULL) {
-		wpa_printf(MSG_ERROR, "Line %d: invalid field '%s' string "
-			   "value '%s'.", line, var, value);
-		return -1;
-	}
-
-	if (os_strcmp(var, "realm") == 0) {
-		os_free(cred->realm);
-		cred->realm = val;
-		return 0;
-	}
-
-	if (os_strcmp(var, "username") == 0) {
-		os_free(cred->username);
-		cred->username = val;
-		return 0;
-	}
-
-	if (os_strcmp(var, "password") == 0) {
-		os_free(cred->password);
-		cred->password = val;
-		return 0;
-	}
-
-	if (os_strcmp(var, "ca_cert") == 0) {
-		os_free(cred->ca_cert);
-		cred->ca_cert = val;
-		return 0;
-	}
-
-	if (os_strcmp(var, "client_cert") == 0) {
-		os_free(cred->client_cert);
-		cred->client_cert = val;
-		return 0;
-	}
-
-	if (os_strcmp(var, "private_key") == 0) {
-		os_free(cred->private_key);
-		cred->private_key = val;
-		return 0;
-	}
-
-	if (os_strcmp(var, "private_key_passwd") == 0) {
-		os_free(cred->private_key_passwd);
-		cred->private_key_passwd = val;
-		return 0;
-	}
-
-	if (os_strcmp(var, "imsi") == 0) {
-		os_free(cred->imsi);
-		cred->imsi = val;
-		return 0;
-	}
-
-	if (os_strcmp(var, "milenage") == 0) {
-		os_free(cred->milenage);
-		cred->milenage = val;
-		return 0;
-	}
-
-	if (os_strcmp(var, "domain") == 0) {
-		os_free(cred->domain);
-		cred->domain = val;
-		return 0;
-	}
-
-	if (line) {
-		wpa_printf(MSG_ERROR, "Line %d: unknown cred field '%s'.",
-			   line, var);
-	}
-
-	os_free(val);
-
-	return -1;
-}
-
-
-struct wpa_cred * wpa_config_get_cred(struct wpa_config *config, int id)
-{
-	struct wpa_cred *cred;
-
-	cred = config->cred;
-	while (cred) {
-		if (id == cred->id)
-			break;
-		cred = cred->next;
-	}
-
-	return cred;
-}
-
-
-struct wpa_cred * wpa_config_add_cred(struct wpa_config *config)
-{
-	int id;
-	struct wpa_cred *cred, *last = NULL;
-
-	id = -1;
-	cred = config->cred;
-	while (cred) {
-		if (cred->id > id)
-			id = cred->id;
-		last = cred;
-		cred = cred->next;
-	}
-	id++;
-
-	cred = os_zalloc(sizeof(*cred));
-	if (cred == NULL)
-		return NULL;
-	cred->id = id;
-	if (last)
-		last->next = cred;
-	else
-		config->cred = cred;
-
-	return cred;
-}
-
-
-int wpa_config_remove_cred(struct wpa_config *config, int id)
-{
-	struct wpa_cred *cred, *prev = NULL;
-
-	cred = config->cred;
-	while (cred) {
-		if (id == cred->id)
-			break;
-		prev = cred;
-		cred = cred->next;
-	}
-
-	if (cred == NULL)
-		return -1;
-
-	if (prev)
-		prev->next = cred->next;
-	else
-		config->cred = cred->next;
-
-	wpa_config_free_cred(cred);
-	return 0;
-}
-
-
 #ifndef CONFIG_NO_CONFIG_BLOBS
 /**
  * wpa_config_get_blob - Get a named configuration blob
@@ -2536,6 +2366,11 @@ struct wpa_config * wpa_config_alloc_empty(const char *ctrl_interface,
 	config->bss_expiration_scan_count = DEFAULT_BSS_EXPIRATION_SCAN_COUNT;
 	config->max_num_sta = DEFAULT_MAX_NUM_STA;
 	config->access_network_type = DEFAULT_ACCESS_NETWORK_TYPE;
+
+#ifdef CONFIG_WFD
+	config->wfd_session_mgmt_ctrl_port = WFD_DEFAULT_SESSION_MGMT_CTRL_PORT;
+	config->wfd_device_max_throughput = WFD_DEFAULT_MAX_THROUGHPUT;
+#endif
 
 	if (ctrl_interface)
 		config->ctrl_interface = os_strdup(ctrl_interface);
@@ -2741,6 +2576,55 @@ static int wpa_config_process_sec_device_type(
 	config->num_sec_device_types++;
 	return 0;
 }
+
+
+static int wpa_config_process_p2p_pref_chan(
+	const struct global_parse_data *data,
+	struct wpa_config *config, int line, const char *pos)
+{
+	struct p2p_channel *pref = NULL, *n;
+	unsigned int num = 0;
+	const char *pos2;
+	u8 op_class, chan;
+
+	/* format: class:chan,class:chan,... */
+
+	while (*pos) {
+		op_class = atoi(pos);
+		pos2 = os_strchr(pos, ':');
+		if (pos2 == NULL)
+			goto fail;
+		pos2++;
+		chan = atoi(pos2);
+
+		n = os_realloc(pref, (num + 1) * sizeof(struct p2p_channel));
+		if (n == NULL)
+			goto fail;
+		pref = n;
+		pref[num].op_class = op_class;
+		pref[num].chan = chan;
+		num++;
+
+		pos = os_strchr(pos2, ',');
+		if (pos == NULL)
+			break;
+		pos++;
+	}
+
+	os_free(config->p2p_pref_chan);
+	config->p2p_pref_chan = pref;
+	config->num_p2p_pref_chan = num;
+	wpa_hexdump(MSG_DEBUG, "P2P: Preferred class/channel pairs",
+		    (u8 *) config->p2p_pref_chan,
+		    config->num_p2p_pref_chan * sizeof(struct p2p_channel));
+
+	return 0;
+
+fail:
+	os_free(pref);
+	wpa_printf(MSG_ERROR, "Line %d: Invalid p2p_pref_chan list", line);
+	return -1;
+}
 #endif /* CONFIG_P2P */
 
 
@@ -2780,13 +2664,10 @@ static const struct global_parse_data global_fields[] = {
 #endif /* CONFIG_CTRL_IFACE */
 	{ INT_RANGE(eapol_version, 1, 2), 0 },
 	{ INT(ap_scan), 0 },
-	{ INT(disable_scan_offload), 0 },
 	{ INT(fast_reauth), 0 },
 	{ STR(opensc_engine_path), 0 },
 	{ STR(pkcs11_engine_path), 0 },
 	{ STR(pkcs11_module_path), 0 },
-	{ STR(pcsc_reader), 0 },
-	{ STR(pcsc_pin), 0 },
 	{ STR(driver_param), 0 },
 	{ INT(dot11RSNAConfigPMKLifetime), 0 },
 	{ INT(dot11RSNAConfigPMKReauthThreshold), 0 },
@@ -2818,19 +2699,44 @@ static const struct global_parse_data global_fields[] = {
 	{ INT_RANGE(persistent_reconnect, 0, 1), 0 },
 	{ INT_RANGE(p2p_intra_bss, 0, 1), CFG_CHANGED_P2P_INTRA_BSS },
 	{ INT(p2p_group_idle), 0 },
+	{ FUNC(p2p_pref_chan), CFG_CHANGED_P2P_PREF_CHAN },
 #endif /* CONFIG_P2P */
+#ifdef ANDROID_P2P
+	{ STR_RANGE(prioritize, 0, 32), CFG_CHANGED_IFACE_PRIORITY },
+#endif
 	{ FUNC(country), CFG_CHANGED_COUNTRY },
 	{ INT(bss_max_count), 0 },
 	{ INT(bss_expiration_age), 0 },
 	{ INT(bss_expiration_scan_count), 0 },
 	{ INT_RANGE(filter_ssids, 0, 1), 0 },
-	{ INT_RANGE(filter_rssi, -100, 0), 0 },
 	{ INT(max_num_sta), 0 },
 	{ INT_RANGE(disassoc_low_ack, 0, 1), 0 },
+	{ STR(home_realm), 0 },
+	{ STR(home_username), 0 },
+	{ STR(home_password), 0 },
+	{ STR(home_ca_cert), 0 },
+	{ STR(home_imsi), 0 },
+	{ STR(home_milenage), 0 },
 	{ INT_RANGE(interworking, 0, 1), 0 },
 	{ FUNC(hessid), 0 },
 	{ INT_RANGE(access_network_type, 0, 15), 0 },
-	{ INT_RANGE(pbc_in_m1, 0, 1), 0 }
+#ifdef CONFIG_WFD
+	{ STR_RANGE(wfd_enable, 1, 1), 0 },
+	{ STR_RANGE(wfd_device_type, 6, 19), 0 },
+	{ STR_RANGE(wfd_coupled_sink_supported_by_source, 1, 1), 0 },
+	{ STR_RANGE(wfd_coupled_sink_supported_by_sink, 1, 1), 0 },
+	{ STR_RANGE(wfd_available_for_session, 1, 1), 0 },
+	{ STR_RANGE(wfd_service_discovery_supported, 1, 1), 0 },
+	{ STR_RANGE(wfd_preferred_connectivity, 3, 4), 0 },
+	{ STR_RANGE(wfd_content_protection_supported, 1, 1), 0 },
+	{ STR_RANGE(wfd_time_sync_supported, 1, 1), 0 },
+	{ STR_RANGE(primarysink_audio_notsupported, 1, 1), 0 },
+	{ STR_RANGE(source_audio_only_supported, 1, 1), 0 },
+	{ STR_RANGE(tdls_persistent_group_intended, 1, 1), 0 },
+	{ STR_RANGE(tdls_persistent_group_reinvoke, 1, 1), 0 },
+	{ INT(wfd_session_mgmt_ctrl_port), 0 },
+	{ INT(wfd_device_max_throughput), 0 }
+#endif
 };
 
 #undef FUNC

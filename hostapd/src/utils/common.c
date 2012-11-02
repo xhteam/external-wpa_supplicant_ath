@@ -371,7 +371,7 @@ const char * wpa_ssid_txt(const u8 *ssid, size_t ssid_len)
 #ifndef WPA_UNICODE_SSID
 		if ((u8) *pos < 32 || (u8) *pos >= 127)
 			*pos = '_';
-#endif /* WPA_UNICODE_SSID */
+#endif
 	}
 	return ssid_txt;
 }

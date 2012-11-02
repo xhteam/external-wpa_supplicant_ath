@@ -30,31 +30,13 @@
 #include "ap_drv_ops.h"
 #include "ap_config.h"
 #include "p2p_hostapd.h"
-#include "gas_serv.h"
 
 
-static int hostapd_flush_old_stations(struct hostapd_data *hapd, u16 reason);
+static int hostapd_flush_old_stations(struct hostapd_data *hapd);
 static int hostapd_setup_encryption(char *iface, struct hostapd_data *hapd);
 static int hostapd_broadcast_wep_clear(struct hostapd_data *hapd);
 
 extern int wpa_debug_level;
-
-
-int hostapd_for_each_interface(struct hapd_interfaces *interfaces,
-			       int (*cb)(struct hostapd_iface *iface,
-					 void *ctx), void *ctx)
-{
-	size_t i;
-	int ret;
-
-	for (i = 0; i < interfaces->count; i++) {
-		ret = cb(interfaces->iface[i], ctx);
-		if (ret)
-			return ret;
-	}
-
-	return 0;
-}
 
 
 static void hostapd_reload_bss(struct hostapd_data *hapd)
@@ -123,8 +105,7 @@ int hostapd_reload_config(struct hostapd_iface *iface)
 	 * allow them to use the BSS anymore.
 	 */
 	for (j = 0; j < iface->num_bss; j++) {
-		hostapd_flush_old_stations(iface->bss[j],
-					   WLAN_REASON_PREV_AUTH_NOT_VALID);
+		hostapd_flush_old_stations(iface->bss[j]);
 		hostapd_broadcast_wep_clear(iface->bss[j]);
 
 #ifndef CONFIG_NO_RADIUS
@@ -229,9 +210,21 @@ static int hostapd_broadcast_wep_set(struct hostapd_data *hapd)
 	return errors;
 }
 
-
-static void hostapd_free_hapd_data(struct hostapd_data *hapd)
+/**
+ * hostapd_cleanup - Per-BSS cleanup (deinitialization)
+ * @hapd: Pointer to BSS data
+ *
+ * This function is used to free all per-BSS data structures and resources.
+ * This gets called in a loop for each BSS between calls to
+ * hostapd_cleanup_iface_pre() and hostapd_cleanup_iface() when an interface
+ * is deinitialized. Most of the modules that are initialized in
+ * hostapd_setup_bss() are deinitialized here.
+ */
+static void hostapd_cleanup(struct hostapd_data *hapd)
 {
+	if (hapd->iface->ctrl_iface_deinit)
+		hapd->iface->ctrl_iface_deinit(hapd);
+
 	iapp_deinit(hapd->iapp);
 	hapd->iapp = NULL;
 	accounting_deinit(hapd);
@@ -263,29 +256,12 @@ static void hostapd_free_hapd_data(struct hostapd_data *hapd)
 	hapd->p2p_probe_resp_ie = NULL;
 #endif /* CONFIG_P2P */
 
+#ifdef CONFIG_WFD
+	wpabuf_free(hapd->wfd_assoc_resp_ie);
+	hapd->wfd_assoc_resp_ie = NULL;
+#endif /* CONFIG_WFD */
+
 	wpabuf_free(hapd->time_adv);
-
-#ifdef CONFIG_INTERWORKING
-	gas_serv_deinit(hapd);
-#endif /* CONFIG_INTERWORKING */
-}
-
-
-/**
- * hostapd_cleanup - Per-BSS cleanup (deinitialization)
- * @hapd: Pointer to BSS data
- *
- * This function is used to free all per-BSS data structures and resources.
- * This gets called in a loop for each BSS between calls to
- * hostapd_cleanup_iface_pre() and hostapd_cleanup_iface() when an interface
- * is deinitialized. Most of the modules that are initialized in
- * hostapd_setup_bss() are deinitialized here.
- */
-static void hostapd_cleanup(struct hostapd_data *hapd)
-{
-	if (hapd->iface->ctrl_iface_deinit)
-		hapd->iface->ctrl_iface_deinit(hapd);
-	hostapd_free_hapd_data(hapd);
 }
 
 
@@ -301,18 +277,6 @@ static void hostapd_cleanup_iface_pre(struct hostapd_iface *iface)
 }
 
 
-static void hostapd_cleanup_iface_partial(struct hostapd_iface *iface)
-{
-	hostapd_free_hw_features(iface->hw_features, iface->num_hw_features);
-	iface->hw_features = NULL;
-	os_free(iface->current_rates);
-	iface->current_rates = NULL;
-	os_free(iface->basic_rates);
-	iface->basic_rates = NULL;
-	ap_list_deinit(iface);
-}
-
-
 /**
  * hostapd_cleanup_iface - Complete per-interface cleanup
  * @iface: Pointer to interface data
@@ -322,22 +286,19 @@ static void hostapd_cleanup_iface_partial(struct hostapd_iface *iface)
  */
 static void hostapd_cleanup_iface(struct hostapd_iface *iface)
 {
-	hostapd_cleanup_iface_partial(iface);
+	hostapd_free_hw_features(iface->hw_features, iface->num_hw_features);
+	iface->hw_features = NULL;
+	os_free(iface->current_rates);
+	iface->current_rates = NULL;
+	os_free(iface->basic_rates);
+	iface->basic_rates = NULL;
+	ap_list_deinit(iface);
 	hostapd_config_free(iface->conf);
 	iface->conf = NULL;
 
 	os_free(iface->config_fname);
 	os_free(iface->bss);
 	os_free(iface);
-}
-
-
-static void hostapd_clear_wep(struct hostapd_data *hapd)
-{
-	if (hapd->drv_priv) {
-		hostapd_set_privacy(hapd, 0);
-		hostapd_broadcast_wep_clear(hapd);
-	}
 }
 
 
@@ -377,7 +338,7 @@ static int hostapd_setup_encryption(char *iface, struct hostapd_data *hapd)
 }
 
 
-static int hostapd_flush_old_stations(struct hostapd_data *hapd, u16 reason)
+static int hostapd_flush_old_stations(struct hostapd_data *hapd)
 {
 	int ret = 0;
 	u8 addr[ETH_ALEN];
@@ -393,7 +354,7 @@ static int hostapd_flush_old_stations(struct hostapd_data *hapd, u16 reason)
 	}
 	wpa_dbg(hapd->msg_ctx, MSG_DEBUG, "Deauthenticate all stations");
 	os_memset(addr, 0xff, ETH_ALEN);
-	hostapd_drv_sta_deauth(hapd, addr, reason);
+	hostapd_drv_sta_deauth(hapd, addr, WLAN_REASON_PREV_AUTH_NOT_VALID);
 	hostapd_free_stas(hapd);
 
 	return ret;
@@ -563,7 +524,7 @@ static int hostapd_setup_bss(struct hostapd_data *hapd, int first)
 	if (conf->wmm_enabled < 0)
 		conf->wmm_enabled = hapd->iconf->ieee80211n;
 
-	hostapd_flush_old_stations(hapd, WLAN_REASON_PREV_AUTH_NOT_VALID);
+	hostapd_flush_old_stations(hapd);
 	hostapd_set_privacy(hapd, 0);
 
 	hostapd_broadcast_wep_clear(hapd);
@@ -658,13 +619,6 @@ static int hostapd_setup_bss(struct hostapd_data *hapd, int first)
 			   "failed.");
 		return -1;
 	}
-
-#ifdef CONFIG_INTERWORKING
-	if (gas_serv_init(hapd)) {
-		wpa_printf(MSG_ERROR, "GAS server initialization failed");
-		return -1;
-	}
-#endif /* CONFIG_INTERWORKING */
 
 	if (hapd->iface->ctrl_iface_init &&
 	    hapd->iface->ctrl_iface_init(hapd)) {
@@ -908,7 +862,6 @@ hostapd_alloc_bss_data(struct hostapd_iface *hapd_iface,
 	hapd->conf = bss;
 	hapd->iface = hapd_iface;
 	hapd->driver = hapd->iconf->driver;
-	hapd->ctrl_sock = -1;
 
 	return hapd;
 }
@@ -925,8 +878,7 @@ void hostapd_interface_deinit(struct hostapd_iface *iface)
 	for (j = 0; j < iface->num_bss; j++) {
 		struct hostapd_data *hapd = iface->bss[j];
 		hostapd_free_stas(hapd);
-		hostapd_flush_old_stations(hapd, WLAN_REASON_DEAUTH_LEAVING);
-		hostapd_clear_wep(hapd);
+		hostapd_flush_old_stations(hapd);
 		hostapd_cleanup(hapd);
 	}
 }

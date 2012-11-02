@@ -34,6 +34,7 @@ struct ap_info {
 
 	int channel;
 	int datarate; /* in 100 kbps */
+	int ssi_signal;
 
 	int ht_support;
 

@@ -1,7 +1,6 @@
 /*
  * wpa_supplicant - Event notifications
  * Copyright (c) 2009-2010, Jouni Malinen <j@w1.fi>
- * Copyright (C) 2012 Freescale Semiconductor, Inc.
  *
  * This software may be distributed under the terms of the BSD license.
  * See README for more details.
@@ -97,8 +96,7 @@ void wpas_notify_state_changed(struct wpa_supplicant *wpa_s,
 		     MAC2STR(wpa_s->pending_bssid),
 		     wpa_s->current_ssid && wpa_s->current_ssid->ssid ?
 		     wpa_ssid_txt(wpa_s->current_ssid->ssid,
-				  wpa_s->current_ssid->ssid_len): "");
-
+		     wpa_s->current_ssid->ssid_len): "");
 #endif /* ANDROID */
 }
 

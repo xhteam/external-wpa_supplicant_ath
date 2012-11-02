@@ -264,15 +264,6 @@ struct wpa_driver_scan_params {
 	size_t num_filter_ssids;
 
 	/**
-	 * filter_rssi - Filter by RSSI
-	 *
-	 * The driver may filter scan results in firmware to reduce host
-	 * wakeups and thereby save power. Specify the RSSI threshold in s32
-	 * dBm.
-	 */
-	s32 filter_rssi;
-
-	/**
 	 * p2p_probe - Used to disable CCK (802.11b) rates for P2P probes
 	 *
 	 * When set, the driver is expected to remove rates 1, 2, 5.5, and 11
@@ -735,7 +726,6 @@ struct wpa_driver_capa {
 #define WPA_DRIVER_CAPA_ENC_WEP104	0x00000002
 #define WPA_DRIVER_CAPA_ENC_TKIP	0x00000004
 #define WPA_DRIVER_CAPA_ENC_CCMP	0x00000008
-#define WPA_DRIVER_CAPA_ENC_WEP128	0x00000010
 	unsigned int enc;
 
 #define WPA_DRIVER_AUTH_OPEN		0x00000001
@@ -2391,7 +2381,18 @@ struct wpa_driver_ops {
 	 * DEPRECATED - use set_ap() instead
 	 */
 	int (*set_authmode)(void *priv, int authmode);
-
+#ifdef ANDROID
+	/**
+	 * driver_cmd - execute driver-specific command
+	 * @priv: private driver interface data
+	 * @cmd: command to execute
+	 * @buf: return buffer
+	 * @buf_len: buffer length
+	 *
+	 * Returns: 0 on success, -1 on failure
+	 */
+	 int (*driver_cmd)(void *priv, char *cmd, char *buf, size_t buf_len);
+#endif
 	/**
 	 * set_rekey_info - Set rekey information
 	 * @priv: Private driver interface data
@@ -2507,29 +2508,19 @@ struct wpa_driver_ops {
 	 */
 	void (*poll_client)(void *priv, const u8 *own_addr,
 			    const u8 *addr, int qos);
-
+#ifdef ANDROID_P2P
 	/**
-	 * radio_disable - Disable/enable radio
+	 * switch_channel - Announce channel switch and migrate the GO to a
+	 * given frequency.
 	 * @priv: Private driver interface data
-	 * @disabled: 1=disable 0=enable radio
+	 * @freq: frequency in MHz
 	 * Returns: 0 on success, -1 on failure
 	 *
-	 * This optional command is for testing purposes. It can be used to
-	 * disable the radio on a testbed device to simulate out-of-radio-range
-	 * conditions.
+	 * This function is used to move the GO to the legacy STA channel to avoid
+	 * frequency conflict in single channel concurrency.
 	 */
-	int (*radio_disable)(void *priv, int disabled);
-
-	/**
-	 * driver_cmd - execute driver-specific command
-	 * @priv: private driver interface data
-	 * @cmd: command to execute
-	 * @buf: return buffer
-	 * @buf_len: buffer length
-	 *
-	 * Returns: 0 on success, -1 on failure
-	 */
-	 int (*driver_cmd)(void *priv, char *cmd, char *buf, size_t buf_len);
+	int (*switch_channel)(void *priv, unsigned int freq);
+#endif
 };
 
 

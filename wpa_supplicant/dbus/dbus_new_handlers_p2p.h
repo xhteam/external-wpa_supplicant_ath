@@ -1,9 +1,15 @@
+
 /*
  * WPA Supplicant / dbus-based control interface for p2p
- * Copyright (c) 2011-2012, Intel Corporation
  *
- * This software may be distributed under the terms of the BSD license.
- * See README for more details.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * Alternatively, this software may be distributed under the terms of BSD
+ * license.
+ *
+ * See README and COPYING for more details.
  */
 
 #ifndef DBUS_NEW_HANDLERS_P2P_H
@@ -155,31 +161,11 @@ dbus_bool_t wpas_dbus_getter_p2p_group_members(DBusMessageIter *iter,
 					       DBusError *error,
 					       void *user_data);
 
-dbus_bool_t wpas_dbus_getter_p2p_group_ssid(DBusMessageIter *iter,
-					    DBusError *error,
-					    void *user_data);
-
-dbus_bool_t wpas_dbus_getter_p2p_group_bssid(DBusMessageIter *iter,
-					     DBusError *error,
-					     void *user_data);
-
-dbus_bool_t wpas_dbus_getter_p2p_group_frequency(DBusMessageIter *iter,
-						 DBusError *error,
-						 void *user_data);
-
-dbus_bool_t wpas_dbus_getter_p2p_group_passphrase(DBusMessageIter *iter,
+dbus_bool_t wpas_dbus_getter_p2p_group_properties(DBusMessageIter *iter,
 						  DBusError *error,
 						  void *user_data);
 
-dbus_bool_t wpas_dbus_getter_p2p_group_psk(DBusMessageIter *iter,
-					   DBusError *error,
-					   void *user_data);
-
-dbus_bool_t wpas_dbus_getter_p2p_group_vendor_ext(DBusMessageIter *iter,
-						  DBusError *error,
-						  void *user_data);
-
-dbus_bool_t wpas_dbus_setter_p2p_group_vendor_ext(DBusMessageIter *iter,
+dbus_bool_t wpas_dbus_setter_p2p_group_properties(DBusMessageIter *iter,
 						  DBusError *error,
 						  void *user_data);
 

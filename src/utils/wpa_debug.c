@@ -30,18 +30,25 @@ int wpa_debug_timestamp = 0;
 #define ANDROID_LOG_NAME	"wpa_supplicant"
 #endif /* ANDROID_LOG_NAME */
 
-static int wpa_to_android_level(int level)
+void android_printf(int level, char *format, ...)
 {
-	if (level == MSG_ERROR)
-		return ANDROID_LOG_ERROR;
-	if (level == MSG_WARNING)
-		return ANDROID_LOG_WARN;
-	if (level == MSG_INFO)
-		return ANDROID_LOG_INFO;
-	return ANDROID_LOG_DEBUG;
+	if (level >= wpa_debug_level) {
+		va_list ap;
+		if (level == MSG_ERROR)
+			level = ANDROID_LOG_ERROR;
+		else if (level == MSG_WARNING)
+			level = ANDROID_LOG_WARN;
+		else if (level == MSG_INFO)
+			level = ANDROID_LOG_INFO;
+		else
+			level = ANDROID_LOG_DEBUG;
+		va_start(ap, format);
+		__android_log_vprint(level, ANDROID_LOG_NAME, format, ap);
+		va_end(ap);
+	}
 }
 
-#endif /* CONFIG_ANDROID_LOG */
+#else /* CONFIG_ANDROID_LOG */
 
 #ifndef CONFIG_NO_STDOUT_DEBUG
 
@@ -52,7 +59,6 @@ static FILE *out_file = NULL;
 
 void wpa_debug_print_timestamp(void)
 {
-#ifndef CONFIG_ANDROID_LOG
 	struct os_time tv;
 
 	if (!wpa_debug_timestamp)
@@ -66,7 +72,6 @@ void wpa_debug_print_timestamp(void)
 	} else
 #endif /* CONFIG_DEBUG_FILE */
 	printf("%ld.%06u: ", (long) tv.sec, (unsigned int) tv.usec);
-#endif /* CONFIG_ANDROID_LOG */
 }
 
 
@@ -124,10 +129,6 @@ void wpa_printf(int level, const char *fmt, ...)
 
 	va_start(ap, fmt);
 	if (level >= wpa_debug_level) {
-#ifdef CONFIG_ANDROID_LOG
-		__android_log_vprint(wpa_to_android_level(level),
-				     ANDROID_LOG_NAME, fmt, ap);
-#else /* CONFIG_ANDROID_LOG */
 #ifdef CONFIG_DEBUG_SYSLOG
 		if (wpa_debug_syslog) {
 			vsyslog(syslog_priority(level), fmt, ap);
@@ -148,7 +149,6 @@ void wpa_printf(int level, const char *fmt, ...)
 #ifdef CONFIG_DEBUG_SYSLOG
 		}
 #endif /* CONFIG_DEBUG_SYSLOG */
-#endif /* CONFIG_ANDROID_LOG */
 	}
 	va_end(ap);
 }
@@ -160,44 +160,6 @@ static void _wpa_hexdump(int level, const char *title, const u8 *buf,
 	size_t i;
 	if (level < wpa_debug_level)
 		return;
-#ifdef CONFIG_ANDROID_LOG
-	{
-		const char *display;
-		char *strbuf = NULL;
-		size_t slen = len;
-		if (buf == NULL) {
-			display = " [NULL]";
-		} else if (len == 0) {
-			display = "";
-		} else if (show && len) {
-			/* Limit debug message length for Android log */
-			if (slen > 32)
-				slen = 32;
-			strbuf = os_malloc(1 + 3 * slen);
-			if (strbuf == NULL) {
-				wpa_printf(MSG_ERROR, "wpa_hexdump: Failed to "
-					   "allocate message buffer");
-				return;
-			}
-
-			for (i = 0; i < slen; i++)
-				os_snprintf(&strbuf[i * 3], 4, " %02x",
-					    buf[i]);
-
-			display = strbuf;
-		} else {
-			display = " [REMOVED]";
-		}
-
-		__android_log_print(wpa_to_android_level(level),
-				    ANDROID_LOG_NAME,
-				    "%s - hexdump(len=%lu):%s%s",
-				    title, (long unsigned int) len, display,
-				    len > slen ? " ..." : "");
-		os_free(strbuf);
-		return;
-	}
-#else /* CONFIG_ANDROID_LOG */
 #ifdef CONFIG_DEBUG_SYSLOG
 	if (wpa_debug_syslog) {
 		const char *display;
@@ -225,7 +187,7 @@ static void _wpa_hexdump(int level, const char *title, const u8 *buf,
 		}
 
 		syslog(syslog_priority(level), "%s - hexdump(len=%lu):%s",
-		       title, (unsigned long) len, display);
+		       title, len, display);
 		os_free(strbuf);
 		return;
 	}
@@ -259,7 +221,6 @@ static void _wpa_hexdump(int level, const char *title, const u8 *buf,
 #ifdef CONFIG_DEBUG_FILE
 	}
 #endif /* CONFIG_DEBUG_FILE */
-#endif /* CONFIG_ANDROID_LOG */
 }
 
 void wpa_hexdump(int level, const char *title, const u8 *buf, size_t len)
@@ -283,9 +244,6 @@ static void _wpa_hexdump_ascii(int level, const char *title, const u8 *buf,
 
 	if (level < wpa_debug_level)
 		return;
-#ifdef CONFIG_ANDROID_LOG
-	_wpa_hexdump(level, title, buf, len, show);
-#else /* CONFIG_ANDROID_LOG */
 	wpa_debug_print_timestamp();
 #ifdef CONFIG_DEBUG_FILE
 	if (out_file) {
@@ -359,7 +317,6 @@ static void _wpa_hexdump_ascii(int level, const char *title, const u8 *buf,
 #ifdef CONFIG_DEBUG_FILE
 	}
 #endif /* CONFIG_DEBUG_FILE */
-#endif /* CONFIG_ANDROID_LOG */
 }
 
 
@@ -441,6 +398,7 @@ void wpa_debug_close_file(void)
 
 #endif /* CONFIG_NO_STDOUT_DEBUG */
 
+#endif /* CONFIG_ANDROID_LOG */
 
 #ifndef CONFIG_NO_WPA_MSG
 static wpa_msg_cb_func wpa_msg_cb = NULL;

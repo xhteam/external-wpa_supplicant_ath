@@ -156,6 +156,12 @@ struct hostapd_config * hostapd_config_defaults(void)
 
 	conf->ht_capab = HT_CAP_INFO_SMPS_DISABLED;
 
+	conf->ieee80211n = 1;
+
+	/* Enable ieee80211d and set US as default country */
+	conf->ieee80211d = 1;
+	os_memcpy(conf->country, "US ", 3);
+
 	return conf;
 }
 
@@ -445,6 +451,9 @@ static void hostapd_config_free_bss(struct hostapd_bss_config *conf)
 	}
 #endif /* CONFIG_IEEE80211R */
 
+#ifdef ANDROID_P2P
+	os_free(conf->prioritize);
+#endif
 #ifdef CONFIG_WPS
 	os_free(conf->wps_pin_requests);
 	os_free(conf->device_name);
@@ -465,7 +474,6 @@ static void hostapd_config_free_bss(struct hostapd_bss_config *conf)
 #endif /* CONFIG_WPS */
 
 	os_free(conf->roaming_consortium);
-	os_free(conf->venue_name);
 
 #ifdef CONFIG_RADIUS_TEST
 	os_free(conf->dump_msk_file);
