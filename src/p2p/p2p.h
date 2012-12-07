@@ -53,6 +53,10 @@ enum p2p_wps_method {
 	WPS_NOT_READY, WPS_PIN_DISPLAY, WPS_PIN_KEYPAD, WPS_PBC
 };
 
+enum p2p_sd_action {
+	SRV_UPDATE, SRV_ADD, SRV_DEL, SRV_FLUSH
+};
+
 /**
  * struct p2p_go_neg_results - P2P Group Owner Negotiation results
  */
@@ -74,6 +78,8 @@ struct p2p_go_neg_results {
 	 * freq - Frequency of the group operational channel in MHz
 	 */
 	int freq;
+
+	int ht40;
 
 	/**
 	 * ssid - SSID of the group
@@ -210,6 +216,11 @@ struct p2p_peer_info {
 	size_t wps_sec_dev_type_list_len;
 
 	struct wpabuf *wps_vendor_ext[P2P_MAX_WPS_VENDOR_EXT];
+
+	/**
+	 * wfd_subelems - Wi-Fi Display subelements from WFD IE(s)
+	 */
+	struct wpabuf *wfd_subelems;
 };
 
 enum p2p_prov_disc_status {
@@ -348,6 +359,14 @@ struct p2p_config {
 	 */
 	size_t ssid_postfix_len;
 
+#ifdef ANDROID_P2P
+	enum p2p_concurrency_type {
+		P2P_NON_CONCURRENT,
+		P2P_SINGLE_CHANNEL_CONCURRENT,
+		P2P_MULTI_CHANNEL_CONCURRENT,
+	} p2p_concurrency;
+#endif
+
 	/**
 	 * msg_ctx - Context to use with wpa_msg() calls
 	 */
@@ -369,14 +388,14 @@ struct p2p_config {
 	 * @num_req_dev_types: Number of requested device types
 	 * @req_dev_types: Array containing requested device types
 	 * @dev_id: Device ID to search for or %NULL to find all devices
+	 * @pw_id: Device Password ID
 	 * Returns: 0 on success, -1 on failure
 	 *
 	 * This callback function is used to request a P2P scan or search
 	 * operation to be completed. Type type argument specifies which type
 	 * of scan is to be done. @P2P_SCAN_SOCIAL indicates that only the
 	 * social channels (1, 6, 11) should be scanned. @P2P_SCAN_FULL
-	 * indicates that all channels are to be scanned. @P2P_SCAN_SPECIFIC
-	 * request a scan of a single channel specified by freq.
+	 * indicates that all channels are to be scanned.
 	 * @P2P_SCAN_SOCIAL_PLUS_ONE request scan of all the social channels
 	 * plus one extra channel specified by freq.
 	 *
@@ -392,7 +411,7 @@ struct p2p_config {
 	 */
 	int (*p2p_scan)(void *ctx, enum p2p_scan_type type, int freq,
 			unsigned int num_req_dev_types,
-			const u8 *req_dev_types, const u8 *dev_id);
+			const u8 *req_dev_types, const u8 *dev_id, u16 pw_id);
 
 	/**
 	 * send_probe_resp - Transmit a Probe Response frame
@@ -829,12 +848,13 @@ enum p2p_discovery_type {
  *	containing num_req_dev_types * WPS_DEV_TYPE_LEN bytes; %NULL if no
  *	requested device types.
  * @dev_id: Device ID to search for or %NULL to find all devices
+ * @search_delay: Extra delay in milliseconds between search iterations
  * Returns: 0 on success, -1 on failure
  */
 int p2p_find(struct p2p_data *p2p, unsigned int timeout,
 	     enum p2p_discovery_type type,
 	     unsigned int num_req_dev_types, const u8 *req_dev_types,
-	     const u8 *dev_id);
+	     const u8 *dev_id, unsigned int search_delay);
 
 /**
  * p2p_stop_find - Stop P2P Find (Device Discovery)
@@ -957,6 +977,11 @@ int p2p_prov_disc_req(struct p2p_data *p2p, const u8 *peer_addr,
 void * p2p_sd_request(struct p2p_data *p2p, const u8 *dst,
 		      const struct wpabuf *tlvs);
 
+#ifdef CONFIG_WIFI_DISPLAY
+void * p2p_sd_request_wfd(struct p2p_data *p2p, const u8 *dst,
+			  const struct wpabuf *tlvs);
+#endif /* CONFIG_WIFI_DISPLAY */
+
 /**
  * p2p_sd_cancel_request - Cancel a pending service discovery query
  * @p2p: P2P module context from p2p_init()
@@ -987,7 +1012,11 @@ void p2p_sd_response(struct p2p_data *p2p, int freq, const u8 *dst,
  * of the local services. This will increment the Service Update Indicator
  * value which will be used in SD Request and Response frames.
  */
+#ifdef ANDROID_P2P
+void p2p_sd_service_update(struct p2p_data *p2p, int action);
+#else
 void p2p_sd_service_update(struct p2p_data *p2p);
+#endif
 
 
 enum p2p_invite_role {
@@ -1087,15 +1116,32 @@ u16 p2p_get_provisioning_info(struct p2p_data *p2p, const u8 *addr);
 /**
  * p2p_clear_provisioning_info - Clear any stored provisioning info
  * @p2p: P2P module context from p2p_init()
- * @iface_addr: Peer P2P Interface Address
+ * @iface_addr: Peer P2P Device Address
  *
  * This function is used to clear stored WPS provisioning info for the given
  * peer.
  */
-void p2p_clear_provisioning_info(struct p2p_data *p2p, const u8 *iface_addr);
+void p2p_clear_provisioning_info(struct p2p_data *p2p, const u8 *addr);
 
 
 /* Event notifications from lower layer driver operations */
+
+/**
+ * enum p2p_probe_req_status
+ *
+ * @P2P_PREQ_MALFORMED: frame was not well-formed
+ * @P2P_PREQ_NOT_LISTEN: device isn't in listen state, frame ignored
+ * @P2P_PREQ_NOT_P2P: frame was not a P2P probe request
+ * @P2P_PREQ_P2P_NOT_PROCESSED: frame was P2P but wasn't processed
+ * @P2P_PREQ_P2P_PROCESSED: frame has been processed by P2P
+ */
+enum p2p_probe_req_status {
+	P2P_PREQ_MALFORMED,
+	P2P_PREQ_NOT_LISTEN,
+	P2P_PREQ_NOT_P2P,
+	P2P_PREQ_NOT_PROCESSED,
+	P2P_PREQ_PROCESSED
+};
 
 /**
  * p2p_probe_req_rx - Report reception of a Probe Request frame
@@ -1105,10 +1151,11 @@ void p2p_clear_provisioning_info(struct p2p_data *p2p, const u8 *iface_addr);
  * @bssid: BSSID if available or %NULL
  * @ie: Information elements from the Probe Request frame body
  * @ie_len: Length of ie buffer in octets
- * Returns: 0 to indicate the frame was not processed or 1 if it was
+ * Returns: value indicating the type and status of the probe request
  */
-int p2p_probe_req_rx(struct p2p_data *p2p, const u8 *addr, const u8 *dst,
-		     const u8 *bssid, const u8 *ie, size_t ie_len);
+enum p2p_probe_req_status
+p2p_probe_req_rx(struct p2p_data *p2p, const u8 *addr, const u8 *dst,
+		 const u8 *bssid, const u8 *ie, size_t ie_len);
 
 /**
  * p2p_rx_action - Report received Action frame
@@ -1408,6 +1455,15 @@ int p2p_ie_text(struct wpabuf *p2p_ie, char *buf, char *end);
 int p2p_scan_result_text(const u8 *ies, size_t ies_len, char *buf, char *end);
 
 /**
+ * p2p_parse_dev_addr_in_p2p_ie - Parse P2P Device Address from a concatenated
+ * P2P IE
+ * @p2p_ie: P2P IE
+ * @dev_addr: Buffer for returning P2P Device Address
+ * Returns: 0 on success or -1 if P2P Device Address could not be parsed
+ */
+int p2p_parse_dev_addr_in_p2p_ie(struct wpabuf *p2p_ie, u8 *dev_addr);
+
+/**
  * p2p_parse_dev_addr - Parse P2P Device Address from P2P IE(s)
  * @ies: Information elements from scan results
  * @ies_len: ies buffer length in octets
@@ -1686,13 +1742,29 @@ int p2p_other_scan_completed(struct p2p_data *p2p);
 
 const char * p2p_wps_method_text(enum p2p_wps_method method);
 
-#ifdef CONFIG_WFD
 /**
- * p2p_set_wfd_data - Store WFD module context for use by P2P
+ * p2p_set_config_timeout - Set local config timeouts
  * @p2p: P2P module context from p2p_init()
- * @wfd: WFD module context from wfd_init()
+ * @go_timeout: Time in 10 ms units it takes to start the GO mode
+ * @client_timeout: Time in 10 ms units it takes to start the client mode
  */
-void p2p_set_wfd_data(struct p2p_data *p2p, void *wfd);
-#endif
+void p2p_set_config_timeout(struct p2p_data *p2p, u8 go_timeout,
+			    u8 client_timeout);
+
+void p2p_increase_search_delay(struct p2p_data *p2p, unsigned int delay);
+
+int p2p_set_wfd_ie_beacon(struct p2p_data *p2p, struct wpabuf *ie);
+int p2p_set_wfd_ie_probe_req(struct p2p_data *p2p, struct wpabuf *ie);
+int p2p_set_wfd_ie_probe_resp(struct p2p_data *p2p, struct wpabuf *ie);
+int p2p_set_wfd_ie_assoc_req(struct p2p_data *p2p, struct wpabuf *ie);
+int p2p_set_wfd_ie_invitation(struct p2p_data *p2p, struct wpabuf *ie);
+int p2p_set_wfd_ie_prov_disc_req(struct p2p_data *p2p, struct wpabuf *ie);
+int p2p_set_wfd_ie_prov_disc_resp(struct p2p_data *p2p, struct wpabuf *ie);
+int p2p_set_wfd_ie_go_neg(struct p2p_data *p2p, struct wpabuf *ie);
+int p2p_set_wfd_dev_info(struct p2p_data *p2p, const struct wpabuf *elem);
+int p2p_set_wfd_assoc_bssid(struct p2p_data *p2p, const struct wpabuf *elem);
+int p2p_set_wfd_coupled_sink_info(struct p2p_data *p2p,
+				  const struct wpabuf *elem);
+struct wpabuf * wifi_display_encaps(struct wpabuf *subelems);
 
 #endif /* P2P_H */
