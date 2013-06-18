@@ -58,7 +58,7 @@
  * How many seconds to wait for initial 4-way handshake to get completed after
  * WPS provisioning step.
  */
-#define P2P_MAX_INITIAL_CONN_WAIT 10
+#define P2P_MAX_INITIAL_CONN_WAIT 20
 #endif /* P2P_MAX_INITIAL_CONN_WAIT */
 
 #ifndef P2P_CONCURRENT_SEARCH_DELAY
@@ -4800,7 +4800,6 @@ static void wpas_p2p_set_group_idle_timeout(struct wpa_supplicant *wpa_s)
 			   "during provisioning");
 		return;
 	}
-#ifndef ANDROID_P2P
 	if (wpa_s->show_group_started) {
 		/*
 		 * Use the normal group formation timeout between the end of
@@ -4813,7 +4812,6 @@ static void wpas_p2p_set_group_idle_timeout(struct wpa_supplicant *wpa_s)
 			   "complete");
 		return;
 	}
-#endif
 
 	wpa_printf(MSG_DEBUG, "P2P: Set P2P group idle timeout to %u seconds",
 		   timeout);
